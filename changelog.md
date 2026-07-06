@@ -1,5 +1,6 @@
 # 2.8.7
 
+- Added **Auto Activate** in range
 - Added info button for mods that have per player options
 - Added movable startpos switcher button
 - Fixed Button Module keybinds repeating

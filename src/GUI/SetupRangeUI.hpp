@@ -17,6 +17,8 @@ namespace qolmod
             cocos2d::CCClippingNode* redClip = nullptr;
             cocos2d::CCClippingNode* greenClip = nullptr;
             PulsingCircle* pulsing = nullptr;
+            CCMenuItemToggler* toggler = nullptr;
+            cocos2d::CCMenu* deleteMenu = nullptr;
             BetterInputNode* min = nullptr;
             BetterInputNode* max = nullptr;
 
@@ -30,6 +32,7 @@ namespace qolmod
             void onInfo(CCObject* sender);
             void onClear(CCObject* sender);
             void onAdd(CCObject* sender);
+            void onRemove(CCObject* sender);
 
             virtual bool setup();
     };

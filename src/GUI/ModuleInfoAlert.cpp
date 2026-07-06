@@ -5,6 +5,7 @@
 #include <Categories/FavouritesNode.hpp>
 #include <SetupShortcutUI.hpp>
 #include <EditKeyConfigUI.hpp>
+#include <SetupRangeUI.hpp>
 
 using namespace geode::prelude;
 using namespace qolmod;
@@ -61,10 +62,16 @@ bool ModuleInfoAlert::init(Module* module)
     btnKeybind->getNormalImage()->setPosition(btnKeybind->getContentSize() / 2);
 
     auto btnShortcut = CCMenuItemToggler::create(CCSprite::createWithSpriteFrameName("shortcuts.png"_spr), CCSprite::createWithSpriteFrameName("shortcuts.png"_spr), this, menu_selector(ModuleInfoAlert::onChangeShortcut));
-    btnShortcut->setPositionX(m_mainLayer->getContentWidth() - 25 - 25);
+    btnShortcut->setPositionX(m_mainLayer->getContentWidth() - 25 - 25 - 25);
+
+    auto btnRanges = Button::create(CCSprite::createWithSpriteFrameName("ranges.png"_spr), this, menu_selector(ModuleInfoAlert::onChangeRanges));
+    btnRanges->setContentSize(btnRanges->getContentSize() * ccp(1, 2));
+    btnRanges->setPositionX(m_mainLayer->getContentWidth() - 25 - 25);
+    btnRanges->getNormalImage()->setPosition(btnRanges->getContentSize() / 2);
 
     menu->addChild(btn);
     menu->addChild(btnKeybind);
+    menu->addChild(btnRanges);
     menu->addChild(btnShortcut);
     m_mainLayer->addChild(menu, 8008569);
     return true;
@@ -100,4 +107,9 @@ void ModuleInfoAlert::onChangeShortcut(CCObject* sender)
     ui->modID = mod->getID();
     ui->setStartConfig(mod->isShortcutEnabled(), mod->getShortcutConfig());
     ui->show();
+}
+
+void ModuleInfoAlert::onChangeRanges(CCObject* sender)
+{
+    SetupRangeUI::create(mod)->show();
 }

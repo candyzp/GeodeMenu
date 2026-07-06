@@ -46,8 +46,11 @@ bool Module::getRealEnabled()
 
     if (auto pl = PlayLayer::get(); pl && pl->m_started)
     {
+        if (pl->m_player1->m_isDead || (pl->m_player2 && pl->m_player2->m_isDead))
+            return userEnabled;
+
         bool inRange;
-        auto ret = enableRanges.getEnable(pl->getCurrentPercent(), userEnabled, &inRange);
+        bool ret = enableRanges.getEnable(pl->getCurrentPercent(), userEnabled, &inRange);
 
         if (inRange && ret != userEnabled)
             SafeMode::get()->onModuleToggled(this);

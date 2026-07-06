@@ -51,7 +51,7 @@ std::string qolmod::utils::toUTF8String(std::wstring ws)
     return str;
 }
 
-void qolmod::utils::addCircleToNode(CCNode* node, float scale)
+CCCircleWave* qolmod::utils::addCircleToNode(CCNode* node, float scale)
 {
     auto circle = CCCircleWave::create(0, 25 * scale, 0.2f, true);
     circle->setPosition(node->getContentSize() / 2);
@@ -59,6 +59,7 @@ void qolmod::utils::addCircleToNode(CCNode* node, float scale)
     circle->setUserObject("allow-circle"_spr, CCNode::create());
 
     node->addChild(circle, 9999);
+    return circle;
 }
 
 const unsigned int kSceneFade = 0xFADEFADE;

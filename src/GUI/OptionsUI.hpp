@@ -29,6 +29,7 @@ class OptionsUI : public PopupBase
         void onToggleFavourite(CCObject* sender);
         void onChangeShortcut(CCObject* sender);
         void onChangeKeybind(CCObject* sender);
+        void onChangeRanges(CCObject* sender);
 
         CCSize calculateSize();
         virtual bool setup();

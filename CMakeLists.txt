@@ -28,14 +28,10 @@ file(GLOB SOURCES
 )
 
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
-add_link_options(/errorlimit:0)
 
-# Windows specific settings
+# enable symbols on windows
 if (WIN32)
-  # Disable annoying warnings
   target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
-
-  # Export all symbols for better debugging
   set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
@@ -50,7 +46,12 @@ include_directories(include src/Client src/Hacks/Speedhack src/Utils src/Notific
 
 # CPMAddPackage("gh:TheSillyDoggo/gd-imgui-cocos#2d33a3d") # should be geode
 
-CPMAddPackage("gh:EclipseMenu/RIFT#v1")
+CPMAddPackage(
+    NAME rift
+    GIT_REPOSITORY https://git.eclipse.menu/EclipseMenu/RIFT
+    GIT_TAG v1
+)
+
 CPMAddPackage("gh:rapidfuzz/rapidfuzz-cpp#main")
 CPMAddPackage("gh:maxnut/GDReplayFormat#72078e5")
 CPMAddPackage("gh:ZXShady/enchantum#116de86")

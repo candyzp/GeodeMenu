@@ -3,10 +3,36 @@
 using namespace geode::prelude;
 using namespace qolmod;
 
+// purpose: merge overlapped ranges
 void Ranges::sort()
 {
-    // TODO: implement
-    // purpose: stop overlapped ranges
+    return;
+    std::unordered_map<double, uint8_t> commandMap = {};
+
+    std::function<bool(double)> canReplace = [&](double v)
+    {
+        if (commandMap.contains(v) && commandMap[v] == 0)
+            return true;
+
+        return !commandMap.contains(v);
+    };
+
+    for (auto& zone : ranges)
+    {
+        if (canReplace(zone.min))
+            commandMap.emplace(zone.min, zone.enable ? 1 : 2);
+        
+        if (canReplace(zone.max))
+            commandMap.emplace(zone.max, 0);
+    }
+
+    std::map<double, uint8_t> sorted(commandMap.begin(), commandMap.end());
+    log::info("BEGIN");
+
+    for (auto& sort : sorted)
+    {
+        log::error("1: {}, 2: {}", sort.first, sort.second);
+    }
 }
 
 bool Ranges::getEnable(float value, bool def, bool* inAnyRange)
@@ -27,13 +53,19 @@ bool Ranges::getEnable(float value, bool def, bool* inAnyRange)
 
 void Ranges::addRange(qolmod::Range range)
 {
-    ranges.push_back(range);
+    if (std::abs<float>(range.min - range.max) <= 0.00005f)
+        return;
+
+    ranges.insert(ranges.begin(), range);
     sort();
 }
 
 void Ranges::addRange(float min, float max, bool enable)
 {
-    ranges.push_back(qolmod::Range({
+    if (std::abs<float>(min - max) <= 0.00005f)
+        return;
+
+    ranges.insert(ranges.begin(), qolmod::Range({
         .min = min,
         .max = max,
         .enable = enable
@@ -44,6 +76,11 @@ void Ranges::addRange(float min, float max, bool enable)
 void Ranges::clear()
 {
     ranges.clear();
+}
+
+bool Ranges::isEmpty()
+{
+    return ranges.empty();
 }
 
 matjson::Value Ranges::save()

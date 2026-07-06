@@ -17,6 +17,7 @@ namespace qolmod
             void onToggleFavourite(CCObject* sender);
             void onChangeKeybind(CCObject* sender);
             void onChangeShortcut(CCObject* sender);
+            void onChangeRanges(CCObject* sender);
 
             bool init(Module* module);
     };

@@ -9,6 +9,7 @@
 #include <EditKeyConfigUI.hpp>
 #include <Button.hpp>
 #include <PulsingCircle.hpp>
+#include <SetupRangeUI.hpp>
 
 using namespace qolmod;
 
@@ -83,9 +84,15 @@ bool OptionsUI::setup()
     favBtn->m_offButton->setOpacity(150);
 
     auto btnKeybind = Button::create(CCSprite::createWithSpriteFrameName("keybinds.png"_spr), this, menu_selector(OptionsUI::onChangeKeybind));
-    btnKeybind->setContentSize(btnKeybind->getContentSize() * 3);
+    btnKeybind->setContentSize(btnKeybind->getContentSize() * ccp(1, 2));
     btnKeybind->getNormalImage()->setPosition(btnKeybind->getContentSize() / 2);
     btnKeybind->setPosition(ccp(m_size.width - 18 * 2, -m_size.height + 18 * 2));
+
+    auto btnRanges = Button::create(CCSprite::createWithSpriteFrameName("ranges.png"_spr), this, menu_selector(OptionsUI::onChangeRanges));
+    btnRanges->setContentSize(btnRanges->getContentSize() * ccp(1, 2));
+    btnRanges->setPositionX(btnKeybind->getPositionX() - 25);
+    btnRanges->setPositionY(btnKeybind->getPositionY());
+    btnRanges->getNormalImage()->setPosition(btnRanges->getContentSize() / 2);
 
     auto btnShortcut = CCMenuItemToggler::create(CCSprite::createWithSpriteFrameName("shortcuts.png"_spr), CCSprite::createWithSpriteFrameName("shortcuts.png"_spr), this, menu_selector(OptionsUI::onChangeShortcut));
     btnShortcut->setUserData(module);
@@ -94,6 +101,7 @@ bool OptionsUI::setup()
     menu3->addChild(favBtn);
     menu3->addChild(btnKeybind);
     menu3->addChild(btnShortcut);
+    menu3->addChild(btnRanges);
 
     node = CategoryNode::create();
     node->setAnchorPoint(ccp(0.5f, 0.5f));
@@ -145,15 +153,8 @@ void OptionsUI::onInfo(CCObject* sender)
     ModuleInfoAlert::create(module)->show();
 }
 
-#include <SetupRangeUI.hpp>
-
 void OptionsUI::onSeperateOptionsInfo(CCObject* sender)
 {
-    // DO NOT UPLOAD THIS IS FOR TESTING
-    SetupRangeUI::create(module)->show();
-
-    return;
-
     Mod::get()->setSavedValue<bool>("has-shown-seperate-info", true);
 
     if (pulsingCircle)
@@ -195,6 +196,11 @@ void OptionsUI::onChangeKeybind(CCObject* sender)
     ui->setDefaultConfig({ {}, Keycode::KEY_Unknown });
     ui->setStartConfig(module->getKeybind());
     ui->show();
+}
+
+void OptionsUI::onChangeRanges(CCObject* sender)
+{
+    SetupRangeUI::create(module)->show();
 }
 
 OptionsUI::~OptionsUI()

@@ -32,7 +32,6 @@ bool SetupRangeUI::setup()
     bg = BackgroundSprite::create();
     bg->setContentSize(this->m_size);
     bg->setPosition(this->m_size / 2);
-    this->setUserData(module);
 
     m_buttonMenu->setVisible(false);
     m_mainLayer->addChild(bg);
@@ -63,9 +62,14 @@ bool SetupRangeUI::setup()
     min->setPositionX(-42);
     max->setPositionX(42);
 
+    toggler = CCMenuItemToggler::createWithStandardSprites(this, nullptr, 0.8f);
+    toggler->toggle(true);
+    toggler->setPosition(ccp(0, -50));
+
     area->addChild(min);
     area->addChild(dash);
     area->addChild(max);
+    area->addChild(toggler);
 
     auto add = Button::create(BetterButtonSprite::createWithLocalisation(ccp(67, 30), "edit-range-ui/add-button", "goldFont.fnt", "GJ_button_01.png"), this, menu_selector(SetupRangeUI::onAdd));
 
@@ -149,6 +153,15 @@ CCSprite* SetupRangeUI::createProgress()
     progress->addChild(greenClip, -2);
     progress->addChild(redClip, -2);
 
+    deleteMenu = CCMenu::create();
+    deleteMenu->setPosition(white->getPosition());
+    deleteMenu->setScaleX(red->getContentWidth() / 100.0f);
+    deleteMenu->ignoreAnchorPointForPosition(false);
+    deleteMenu->setAnchorPoint(ccp(0, 0.5f));
+    deleteMenu->setContentSize(white->getContentSize());
+
+    progress->addChild(deleteMenu, 80085);
+
     updateProgress();
     return progress;
 }
@@ -157,7 +170,9 @@ void SetupRangeUI::updateProgress()
 {
     redClip->getStencil()->removeAllChildren();
     greenClip->getStencil()->removeAllChildren();
+    deleteMenu->removeAllChildren();
 
+    int i = 0;
     for (auto& range : module->getRanges()->ranges)
     {
         auto n = CCLayerColor::create(ccc4(255, 255, 255, 255), range.max - range.min, 10);
@@ -166,6 +181,14 @@ void SetupRangeUI::updateProgress()
         n->setPosition(ccp(range.min, 0));
 
         (range.enable ? greenClip->getStencil() : redClip->getStencil())->addChild(n);
+
+        auto btn = Button::create(nullptr, this, menu_selector(SetupRangeUI::onRemove));
+        btn->m_scaleMultiplier = 1.0f;
+        btn->setAnchorPoint(ccp(0, 0.5f));
+        btn->setContentSize(ccp(range.max - range.min, 24));
+        btn->setPosition(ccp(range.min, deleteMenu->getContentHeight() / 2));
+        btn->setTag(i++);
+        deleteMenu->addChild(btn);
     }
 }
 
@@ -196,9 +219,16 @@ void SetupRangeUI::onAdd(CCObject* sender)
     module->getRanges()->addRange(qolmod::Range({
         .min = geode::utils::numFromString<double>(min->getString()).unwrapOr(0),
         .max = geode::utils::numFromString<double>(max->getString()).unwrapOr(0),
-        .enable = true
+        .enable = toggler->isToggled()
     }));
 
+    updateProgress();
+    module->genericSave();
+}
+
+void SetupRangeUI::onRemove(CCObject* sender)
+{
+    module->getRanges()->ranges.erase(module->getRanges()->ranges.begin() + sender->getTag());
     updateProgress();
     module->genericSave();
 }

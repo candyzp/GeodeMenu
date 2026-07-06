@@ -34,10 +34,13 @@ bool Button::init(CCNode* normalSprite, CCNode* selectedSprite, CCNode* disabled
     if (!CCMenuItemSprite::initWithNormalSprite(normalSprite, selectedSprite, disabledSprite, target, selector))
         return false;
 
-    this->setContentSize(normalSprite->getScaledContentSize());
+    if (normalSprite)
+    {
+        this->setContentSize(normalSprite->getScaledContentSize());
 
-    normalSprite->setPosition(getContentSize() / 2);
-    normalSprite->setAnchorPoint(ccp(0.5f, 0.5f));
+        normalSprite->setPosition(getContentSize() / 2);
+        normalSprite->setAnchorPoint(ccp(0.5f, 0.5f));
+    }
 
     scheduleUpdate();
     return true;
