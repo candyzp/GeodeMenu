@@ -1,5 +1,5 @@
 #include "Ranges.hpp"
-#include <cmath>
+#include <math.h>
 
 using namespace geode::prelude;
 using namespace qolmod;
@@ -54,7 +54,7 @@ bool Ranges::getEnable(double value, bool def, bool* inAnyRange)
 
 void Ranges::addRange(qolmod::Range range)
 {
-    if (std::abs<double>(range.min - range.max) <= 0.00005f)
+    if (fabs(range.min - range.max) <= 0.00005f)
         return;
 
     ranges.insert(ranges.begin(), range);
@@ -63,7 +63,7 @@ void Ranges::addRange(qolmod::Range range)
 
 void Ranges::addRange(double min, double max, bool enable)
 {
-    if (std::abs<double>(min - max) <= 0.00005f)
+    if (fabs(min - max) <= 0.00005f)
         return;
 
     ranges.insert(ranges.begin(), qolmod::Range({
