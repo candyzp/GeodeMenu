@@ -46,18 +46,26 @@ bool Module::getRealEnabled()
 
     if (auto pl = PlayLayer::get(); pl && pl->m_started)
     {
-        if (pl->m_player1->m_isDead || (pl->m_player2 && pl->m_player2->m_isDead))
+        if (pl->m_isPlatformer || pl->m_player1->m_isDead || (pl->m_player2 && pl->m_player2->m_isDead))
             return userEnabled;
 
         bool inRange;
         bool ret = enableRanges.getEnable(pl->getCurrentPercent(), userEnabled, &inRange);
 
         if (inRange && ret != userEnabled)
+        {
             SafeMode::get()->onModuleToggled(this);
+        }
+
+        if (inRange != lastRetRange)
+        {
+            onRangeToggleSendNotif(ret);
+            lastRetRange = inRange;
+        }
 
         return ret;
     }
-
+    lastRetRange = false;
     return userEnabled;
 }
 
@@ -478,6 +486,14 @@ std::string Module::getNotificationString()
     auto str = getUserEnabled() ? "ui/notification-mod-enabled" : "ui/notification-mod-disabled";
 
     return utils::string::replace(LocalisationManager::get()->getLocalisedString(str), "%s", getName());
+}
+
+void Module::onRangeToggleSendNotif(bool en)
+{
+    if (en == userEnabled)
+        return;
+
+    log::error("entered range: {}, {}, {}", getID(), lastRetRange, en);
 }
 
 qolmod::Ranges* Module::getRanges()

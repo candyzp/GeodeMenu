@@ -72,7 +72,9 @@ class Module
         int sortPriority = 8008135;
         KeyConfigStruct keyConfig = {};
         bool showSeperateOptionsInfo = false;
+
         qolmod::Ranges enableRanges = {};
+        bool lastRetRange = false;
 
         bool shortcutEnabled = false;
         cocos2d::CCNode* shortcutNode = nullptr;
@@ -154,6 +156,8 @@ class Module
         std::function<bool()> getSafeModeCustom();
         int getSortPriority();
         bool isDisabled();
+
+        void onRangeToggleSendNotif(bool en);
 
         float getSearchWeight(std::string query);
 

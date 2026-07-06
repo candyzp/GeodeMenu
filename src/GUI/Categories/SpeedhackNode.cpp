@@ -122,6 +122,7 @@ void SpeedhackNode::updatePresets()
     {
         auto spr = ButtonSprite::create(floatToStringMin2DP(preset.value).c_str(), "bigFont.fnt", presetDeleteMode ? "GJ_button_06.png" : "GJ_button_05.png");
         auto btn = Button::create(spr, this, presetDeleteMode ? menu_selector(SpeedhackNode::onRemovePreset) : menu_selector(SpeedhackNode::onApplyPreset));
+        btn->m_scaleMultiplier = 1.1f;
         presetMenu->addChild(btn);
         presetBtns.emplace(btn, preset.value);
     }

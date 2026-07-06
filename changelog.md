@@ -6,6 +6,15 @@
 - Fixed Button Module keybinds repeating
 - Fixed blue hitbox being the wrong size
 - Improved small part of UI
+- Localisation:
+-- Added Turkish
+-- Added Argentina Spanish
+-- Updated Mexican Spanish
+-- Updated Latin American Spanish
+-- Updated Vietnamese
+-- Updated Ukrainian
+-- Updated Russian
+-- Updated Brazilian Portuguese
 
 # 2.8.6
 

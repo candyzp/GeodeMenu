@@ -129,7 +129,7 @@ bool OptionsUI::setup()
         if (!Mod::get()->getSavedValue<bool>("has-shown-seperate-info"))
         {
             pulsingCircle = []{
-                auto circle = PulsingCircle::create(2.5f, 18, 1.0f, false, false);
+                auto circle = PulsingCircle::create(2.5f, 15, 0.8f, false, true);
                 circle->color = ccWHITE;
                 return circle;
             }();
