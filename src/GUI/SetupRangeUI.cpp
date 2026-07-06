@@ -49,7 +49,7 @@ bool SetupRangeUI::setup()
 
     auto trashBtn = Button::create(trashSpr, this, menu_selector(SetupRangeUI::onClear));
     auto trashMenu = CCMenu::create();
-    trashMenu->addChild(trashBtn);`
+    trashMenu->addChild(trashBtn);
 
     auto area = CCMenu::create();
 
