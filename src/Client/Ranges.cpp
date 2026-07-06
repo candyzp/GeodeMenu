@@ -35,7 +35,7 @@ void Ranges::sort()
     }
 }
 
-bool Ranges::getEnable(float value, bool def, bool* inAnyRange)
+bool Ranges::getEnable(double value, bool def, bool* inAnyRange)
 {
     *inAnyRange = false;
 
@@ -53,16 +53,16 @@ bool Ranges::getEnable(float value, bool def, bool* inAnyRange)
 
 void Ranges::addRange(qolmod::Range range)
 {
-    if (std::abs<float>(range.min - range.max) <= 0.00005f)
+    if (std::abs<double>(range.min - range.max) <= 0.00005f)
         return;
 
     ranges.insert(ranges.begin(), range);
     sort();
 }
 
-void Ranges::addRange(float min, float max, bool enable)
+void Ranges::addRange(double min, double max, bool enable)
 {
-    if (std::abs<float>(min - max) <= 0.00005f)
+    if (std::abs<double>(min - max) <= 0.00005f)
         return;
 
     ranges.insert(ranges.begin(), qolmod::Range({
