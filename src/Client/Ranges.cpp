@@ -1,4 +1,5 @@
 #include "Ranges.hpp"
+#include <cmath>
 
 using namespace geode::prelude;
 using namespace qolmod;
