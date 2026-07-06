@@ -189,12 +189,12 @@ void EditLayoutUI::fixToAnchorPoints()
     {
         if (anchor.second)
         {
-            if (std::abs(point.y - anchor.first) < anchorSnapDis)
+            if (fabs(point.y - anchor.first) < anchorSnapDis)
                 point.y = anchor.first;
         }
         else
         {
-            if (std::abs(point.x - anchor.first) < anchorSnapDis)
+            if (fabs(point.x - anchor.first) < anchorSnapDis)
                 point.x = anchor.first;
         }
     }
@@ -233,13 +233,13 @@ void EditLayoutUI::updateAnchorPoints()
         {
             point1 = ccp(0, anchor.first);
             point2 = ccp(CCDirector::get()->getWinSize().width, anchor.first);
-            dis = std::abs(grab->getPositionY() - anchor.first);
+            dis = fabs(grab->getPositionY() - anchor.first);
         }
         else
         {
             point1 = ccp(anchor.first, 0);
             point2 = ccp(anchor.first, CCDirector::get()->getWinSize().height);
-            dis = std::abs(grab->getPositionX() - anchor.first);
+            dis = fabs(grab->getPositionX() - anchor.first);
         }
 
         colour.a *= 1.0f - std::clamp<float>(std::clamp<float>(dis / anchorShowDis, 0, 0.7f) / 0.7f, 0, 1);

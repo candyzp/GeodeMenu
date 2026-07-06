@@ -200,7 +200,7 @@ bool CategorySelectMenu::ccTouchBegan(CCTouch* touch, CCEvent* event)
 
 void CategorySelectMenu::ccTouchMoved(CCTouch* touch, CCEvent* event)
 {
-    if (std::abs<float>(scroll->m_contentLayer->getPositionY() - touchInitialScrollY) > 5)
+    if (fabs(scroll->m_contentLayer->getPositionY() - touchInitialScrollY) > 5)
     {
         if (bottomBtns->m_pSelectedItem)
             bottomBtns->m_pSelectedItem->unselected();

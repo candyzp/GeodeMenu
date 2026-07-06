@@ -264,7 +264,7 @@ bool BetterInputNode::ccTouchBegan(CCTouch *pTouch, CCEvent *pEvent)
 
 void BetterInputNode::ccTouchMoved(CCTouch *pTouch, CCEvent *pEvent)
 {
-    if (!isNumHoldActive && numHoldEnabled && std::abs<float>(pTouch->getStartLocation().y - pTouch->getLocation().y) > numHoldInterval)
+    if (!isNumHoldActive && numHoldEnabled && fabs(pTouch->getStartLocation().y - pTouch->getLocation().y) > numHoldInterval)
     {
         numHoldStart = utils::numFromString<float>(text).unwrapOr(numHoldDefault);
         isNumHoldActive = true;

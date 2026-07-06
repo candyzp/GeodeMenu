@@ -73,7 +73,7 @@ void SwelvyBG::updateSpritePosition(float dt) {
     rect.size.height = 320;
 
     float dX = rect.origin.x - speed * dt;
-    if(dX >= std::abs(width)) {
+    if(dX >= fabs(width)) {
         dX = 0;
     }
 
