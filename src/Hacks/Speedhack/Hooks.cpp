@@ -13,30 +13,41 @@ bool CBFCheckMenuLayer::init()
 
 void SpeedhackScheduler::update(float dt)
 {
-    Speedhack::get()->realDeltatime = dt;
+    auto speedhack = Speedhack::get();
+    speedhack->realDeltatime = dt;
+
     ColourUtils::get()->update(dt);
     LabelManager::get()->update(dt);
 
-    float value = Speedhack::get()->getRealValue();
+    const float value = speedhack->getRealValue();
+    const bool gameplayOnly = speedhack->getGameplayEnabled();
 
-    static float lastPitch = 0;
-    float pi = (Speedhack::get()->getMusicEnabled() && Speedhack::get()->gameplayOnlyCheck()) ? value : 1;
+    static float lastPitch = 0.0f;
+    float pitch = 1.0f;
 
-    if (lastPitch != pi)
+    // A 1x speed value can never require a pitch change. Avoid extra module
+    // checks on the overwhelmingly common neutral path.
+    if (value != 1.0f && speedhack->getMusicEnabled() && (!gameplayOnly || GJBaseGameLayer::get()))
+        pitch = value;
+
+    if (lastPitch != pitch)
     {
-        Speedhack::get()->getMasterChannel()->setPitch(pi);
-
-        lastPitch = pi;
+        if (auto group = speedhack->getMasterChannel())
+        {
+            group->setPitch(pitch);
+            lastPitch = pitch;
+        }
     }
 
-    if (Speedhack::get()->getGameplayEnabled())
+    if (gameplayOnly)
     {
         CCScheduler::update(dt);
-        
         return;
     }
 
-    if (cbf)
+    // Do not write to CCDirector's timing fields when speedhack is neutral.
+    // This keeps the default path out of CBF's timing state entirely.
+    if (cbf && value != 1.0f)
     {
         auto director = CCDirector::get();
 
@@ -44,7 +55,7 @@ void SpeedhackScheduler::update(float dt)
         director->m_fDeltaTime *= value;
     }
 
-    CCScheduler::update(dt * value);
+    CCScheduler::update(value == 1.0f ? dt : dt * value);
 }
 
 bool isNodeUnpausable(CCNode* node)

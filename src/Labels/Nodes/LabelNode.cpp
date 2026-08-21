@@ -30,11 +30,12 @@ bool LabelNode::init()
 
 void LabelNode::updateGeneral(float dt)
 {
-    this->setVisible(isVisible());
+    const bool visible = isVisible();
+    this->setVisible(visible);
     this->setScale(config.scale);
     this->setRotation(config.rotation);
 
-    if (isVisible())
+    if (visible)
         update(dt);
 }
 

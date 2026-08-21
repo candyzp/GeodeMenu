@@ -19,6 +19,8 @@ class AndroidBall : public CCNodeRGBA
         float normalOpacity = 0.4f;
         bool smoothMove = true;
         bool missingImportantAssets = false;
+        bool shouldFunctionCached = false;
+        bool visibilityCacheValid = false;
         
     public:
         CREATE_FUNC(AndroidBall);

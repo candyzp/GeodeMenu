@@ -44,6 +44,15 @@ bool Module::getRealEnabled()
             return false;
     }
 
+    // The overwhelming majority of modules do not use percentage enable
+    // ranges. Avoid touching PlayLayer/current percentage on every hook call
+    // when there is nothing to evaluate.
+    if (enableRanges.isEmpty())
+    {
+        lastRetRange = false;
+        return userEnabled;
+    }
+
     if (auto pl = PlayLayer::get(); pl && pl->m_started)
     {
         if (pl->m_isPlatformer || pl->m_player1->m_isDead || (pl->m_player2 && pl->m_player2->m_isDead))

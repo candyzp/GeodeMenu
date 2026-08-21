@@ -21,8 +21,10 @@ class $modify (QOLModRenderingHook, CCDirector)
     {
         CCDirector::drawScene();
 
+        // The scene has already been rendered above. Calling drawScene() again
+        // on an early-exit path doubles the render workload for that frame.
         if (!CCScene::get() || CCScene::get()->getChildByType<LoadingLayer>(0))
-            return CCDirector::drawScene();
+            return;
 
         if (!AndroidUI::get())
         {

@@ -83,7 +83,7 @@ void IconicManager::setDualMode(IconicDualMode mode)
 
 bool IconicManager::areIncompatibleModsLoaded()
 {
-    return getIncompatibleMods().size() > 0;
+    return !incompatibleMods.empty();
 }
 
 std::vector<geode::Mod*> IconicManager::getIncompatibleMods()

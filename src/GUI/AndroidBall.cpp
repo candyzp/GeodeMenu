@@ -152,14 +152,25 @@ bool AndroidBall::shouldFunction()
 
 void AndroidBall::update(float dt)
 {
-    if (!shouldFunction())
+    // Visibility used to be recomputed here and again in visit() every frame.
+    // Cache the result from the scheduled update and reuse it for rendering.
+    shouldFunctionCached = shouldFunction();
+    visibilityCacheValid = true;
+
+    if (!shouldFunctionCached)
         return;
 
-    setSmoothMove(SmoothMoveButton::get()->getRealEnabled());
-    setButtonScale(ButtonScale::get()->getValue());
+    const bool newSmoothMove = SmoothMoveButton::get()->getRealEnabled();
+    if (newSmoothMove != smoothMove)
+        setSmoothMove(newSmoothMove);
 
-    if (getColonThreeSecret() != UseColonThreeButton::get()->getRealEnabled())
-        setColonThreeSecret(UseColonThreeButton::get()->getRealEnabled());
+    const float newScale = ButtonScale::get()->getValue();
+    if (newScale != scale)
+        setButtonScale(newScale);
+
+    const bool colonThree = UseColonThreeButton::get()->getRealEnabled();
+    if (getColonThreeSecret() != colonThree)
+        setColonThreeSecret(colonThree);
 
     if (smoothMove)
     {
@@ -199,7 +210,13 @@ void AndroidBall::onOpenMenu()
 
 void AndroidBall::visit()
 {
-    if (!shouldFunction())
+    if (!visibilityCacheValid)
+    {
+        shouldFunctionCached = shouldFunction();
+        visibilityCacheValid = true;
+    }
+
+    if (!shouldFunctionCached)
         return;
 
     CCNode::visit();

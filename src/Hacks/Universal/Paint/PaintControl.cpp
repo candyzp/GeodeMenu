@@ -104,6 +104,15 @@ void PaintControl::setupChildren()
 
 void PaintControl::update(float dt)
 {
+    // PaintControl is created for everyone at game load. When Paint is off,
+    // keep it completely asleep instead of running floating-button movement,
+    // visibility scans and animated colour work every frame.
+    if (!isActive())
+    {
+        this->setVisible(false);
+        return;
+    }
+
     FloatingUIButton::update(dt);
 
     if (colourSpr)

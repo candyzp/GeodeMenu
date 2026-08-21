@@ -50,6 +50,15 @@ void LabelContainerLayer::update(float dt)
         p1Cps.erase(std::remove_if(p1Cps.begin(), p1Cps.end(), [](float i){ return i > 1; }), p1Cps.end());
         p2Cps.erase(std::remove_if(p2Cps.begin(), p2Cps.end(), [](float i){ return i > 1; }), p2Cps.end());
 
+        // Keep click/CPS accounting alive, but do not run label visibility or
+        // layout work when there are no configured labels to display.
+        if (nodes.empty())
+        {
+            highestP1CPS = std::max<int>(p1Cps.size(), highestP1CPS);
+            highestP2CPS = std::max<int>(p2Cps.size(), highestP2CPS);
+            return;
+        }
+
         if (HideLabels::get()->getRealEnabled())
             return;
     }
@@ -64,8 +73,12 @@ void LabelContainerLayer::update(float dt)
 
     for (auto node : anchors)
     {
-        sortNodeChildren(node.second);
+        // Most label setups use only one or two anchors. Skip the unused
+        // buckets instead of relaying out all nine every gameplay frame.
+        if (node.second->getChildrenCount() == 0)
+            continue;
 
+        sortNodeChildren(node.second);
         node.second->setPosition(getContentSize() * node.second->getAnchorPoint());
     }
 

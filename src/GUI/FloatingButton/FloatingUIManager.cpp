@@ -64,8 +64,8 @@ void FloatingUIManager::visit()
         return;
     }
 
-    sortButtons();
-
+    // Rendering order is already handled by cocos2d child Z-order. Sorting the
+    // separate touch-priority vector every rendered frame only burns CPU.
     return CCNode::visit();
 }
 
@@ -178,7 +178,7 @@ bool FloatingUIManager::touchCancelled(qolmod::Touch* touch)
                     }
                 }
             }
-
+            
             break;
     }
 

@@ -51,15 +51,34 @@ void SafePlayLayer::postUpdate(float dt)
 {
     PlayLayer::postUpdate(dt);
 
-    for (auto mod : Module::getAll())
+    // Custom safe-mode checks are rare, but this used to scan every module on
+    // every gameplay frame just to find them. Rebuild the small subset only
+    // when the module registry changes (for example when an extension loads).
+    static std::vector<Module*> customModules;
+    static size_t cachedModuleCount = 0;
+
+    auto& modules = Module::getAll();
+    if (cachedModuleCount != modules.size())
     {
-        if (mod->getSafeModeTrigger() == SafeModeTrigger::Custom)
+        customModules.clear();
+        customModules.reserve(modules.size());
+
+        for (auto mod : modules)
         {
-            if (mod->getSafeModeCustom()())
-            {
-                SafeMode::get()->addMessage(SafeModeTrigger::Attempt, fmt::format("<cc>{}</c> enabled for <co>this attempt</c>", mod->getName()));
-                SafeMode::get()->isAttemptCheated = true;
-            }
+            if (mod->getSafeModeTrigger() == SafeModeTrigger::Custom)
+                customModules.push_back(mod);
+        }
+
+        cachedModuleCount = modules.size();
+    }
+
+    for (auto mod : customModules)
+    {
+        auto check = mod->getSafeModeCustom();
+        if (check && check())
+        {
+            SafeMode::get()->addMessage(SafeModeTrigger::Attempt, fmt::format("<cc>{}</c> enabled for <co>this attempt</c>", mod->getName()));
+            SafeMode::get()->isAttemptCheated = true;
         }
     }
 }
