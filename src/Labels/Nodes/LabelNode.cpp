@@ -31,9 +31,17 @@ bool LabelNode::init()
 void LabelNode::updateGeneral(float dt)
 {
     const bool visible = isVisible();
-    this->setVisible(visible);
-    this->setScale(config.scale);
-    this->setRotation(config.rotation);
+
+    // These setters dirty the node transform. Avoid forcing Cocos to rebuild
+    // an unchanged transform every gameplay frame.
+    if (CCNode::isVisible() != visible)
+        this->setVisible(visible);
+
+    if (this->getScale() != config.scale)
+        this->setScale(config.scale);
+
+    if (this->getRotation() != config.rotation)
+        this->setRotation(config.rotation);
 
     if (visible)
         update(dt);
@@ -83,7 +91,9 @@ bool LabelNode::isVisible()
 
 void LabelNode::visit(void)
 {
-    if (!isVisible())
+    // updateGeneral already resolved the custom visibility state this frame.
+    // Re-checking isVisible() here repeated module lookups during rendering.
+    if (!CCNode::isVisible())
         return;
 
     CCNode::visit();
