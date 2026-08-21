@@ -173,6 +173,11 @@ float LabelManager::getFPS()
 
 void LabelManager::update(float dt)
 {
+    // A zero/negative scheduler delta would divide by zero below and poison
+    // the FPS accumulator with infinities. Ignore invalid samples instead.
+    if (dt <= 0.0f)
+        return;
+
     _timeLeft -= dt;
     _accum += 1 / dt;
     _frames++;

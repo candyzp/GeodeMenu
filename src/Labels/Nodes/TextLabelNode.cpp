@@ -24,7 +24,10 @@ void TextLabelNode::labelConfigUpdated()
     auto anchorX = LabelManager::get()->anchorToPoint(config.anchor).x;
 
     label->setAlignment(anchorX == 0 ? kCCTextAlignmentLeft : (anchorX == 0.5f ? kCCTextAlignmentCenter : kCCTextAlignmentRight));
-    
+
+    lastRenderedText.clear();
+    textDirty = true;
+
     CC_SAFE_DELETE(script);
     script = rift::compile(config.formatString).unwrapOr(nullptr);
 }
@@ -38,8 +41,14 @@ void TextLabelNode::update(float dt)
 {
     if (!isActionActive())
     {
-        label->setOpacity(config.opacity * 255);
-        label->setColor(getDesiredColour());
+        const auto desiredOpacity = static_cast<GLubyte>(config.opacity * 255);
+        if (label->getOpacity() != desiredOpacity)
+            label->setOpacity(desiredOpacity);
+
+        const auto desiredColour = getDesiredColour();
+        const auto currentColour = label->getColor();
+        if (currentColour.r != desiredColour.r || currentColour.g != desiredColour.g || currentColour.b != desiredColour.b)
+            label->setColor(desiredColour);
     }
 
     std::string str = "Error";
@@ -47,19 +56,29 @@ void TextLabelNode::update(float dt)
     if (script)
     {
         updateVariables();
-        
         str = script->run();
     }
+
+    // AdvLabelBMFont::setString rebuilds the label's glyph tree. Most label
+    // formats don't actually produce different text every rendered frame, so
+    // don't pay that cost unless the output (or label config) changed.
+    if (!textDirty && str == lastRenderedText)
+        return;
+
+    lastRenderedText = str;
+    textDirty = false;
 
     label->setString(str.c_str());
     this->setContentSize(label->getScaledContentSize());
 
-    if (label->getVisibleLabels().size() == 1 && str == ".")
+    auto visibleLabels = label->getVisibleLabels();
+    if (visibleLabels.size() == 1 && str == ".")
     {
         auto anchorX = LabelManager::get()->anchorToPoint(config.anchor).x;
+        auto dot = static_cast<CCNode*>(visibleLabels[0]->getChildren()->objectAtIndex(0));
 
-        static_cast<CCNode*>(label->getVisibleLabels()[0]->getChildren()->objectAtIndex(0))->setScale(2.25f);
-        static_cast<CCNode*>(label->getVisibleLabels()[0]->getChildren()->objectAtIndex(0))->setAnchorPoint(ccp(anchorX == 0 ? 0.2f : (anchorX == 1.0f ? 0.6f : 0.45f), 0.35f));
+        dot->setScale(2.25f);
+        dot->setAnchorPoint(ccp(anchorX == 0 ? 0.2f : (anchorX == 1.0f ? 0.6f : 0.45f), 0.35f));
     }
 }
 
@@ -114,12 +133,16 @@ void TextLabelNode::onEventTriggered(LabelEventType type)
 
 void TextLabelNode::updateVariables()
 {
-    if (!GJBaseGameLayer::get())
+    auto gameLayer = GJBaseGameLayer::get();
+    if (!gameLayer)
         return;
 
-    auto noclipBGL = static_cast<NoclipBaseGameLayer*>(GJBaseGameLayer::get());
+    auto labelManager = LabelManager::get();
+    auto labelContainer = LabelContainerLayer::get();
+    auto playLayer = PlayLayer::get();
+    auto noclipBGL = static_cast<NoclipBaseGameLayer*>(gameLayer);
 
-    std::chrono::milliseconds duration(static_cast<long long>(LabelManager::get()->getSessionDuration() * 1000));
+    std::chrono::milliseconds duration(static_cast<long long>(labelManager->getSessionDuration() * 1000));
 
     auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
     duration -= hours;
@@ -127,34 +150,48 @@ void TextLabelNode::updateVariables()
     duration -= minutes;
     auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
 
-    std::time_t currentTime = std::time(nullptr);
-    std::tm* localTime = std::localtime(&currentTime);
+    // std::localtime is considerably heavier than reading the clock and every
+    // text label used to call it every frame. Share one conversion per second.
+    static std::time_t cachedTime = 0;
+    static std::tm cachedLocalTime = {};
+    auto currentTime = std::time(nullptr);
 
-    script->setVariable("attempt", rift::Value::integer(LabelManager::get()->getAttemptCount()));
-    script->setVariable("fps", rift::Value::floating(LabelManager::get()->getFPS()));
+    if (currentTime != cachedTime)
+    {
+        if (auto localTime = std::localtime(&currentTime))
+            cachedLocalTime = *localTime;
 
-    script->setVariable("player1_cps", rift::Value::integer(LabelContainerLayer::get()->getCPS(NoclipPlayerSelector::Player1)));
-    script->setVariable("player2_cps", rift::Value::integer(LabelContainerLayer::get()->getCPS(NoclipPlayerSelector::Player2)));
-    script->setVariable("total_cps", rift::Value::integer(LabelContainerLayer::get()->getCPS(NoclipPlayerSelector::All)));
+        cachedTime = currentTime;
+    }
 
-    script->setVariable("player1_max_cps", rift::Value::integer(LabelContainerLayer::get()->getHighestCPS(NoclipPlayerSelector::Player1)));
-    script->setVariable("player2_max_cps", rift::Value::integer(LabelContainerLayer::get()->getHighestCPS(NoclipPlayerSelector::Player2)));
-    script->setVariable("max_cps", rift::Value::integer(LabelContainerLayer::get()->getHighestCPS(NoclipPlayerSelector::All)));
+    script->setVariable("attempt", rift::Value::integer(labelManager->getAttemptCount()));
+    script->setVariable("fps", rift::Value::floating(labelManager->getFPS()));
 
-    script->setVariable("player1_clicks", rift::Value::integer(LabelContainerLayer::get()->getTotalClicks(NoclipPlayerSelector::Player1)));
-    script->setVariable("player2_clicks", rift::Value::integer(LabelContainerLayer::get()->getTotalClicks(NoclipPlayerSelector::Player2)));
-    script->setVariable("total_clicks", rift::Value::integer(LabelContainerLayer::get()->getTotalClicks(NoclipPlayerSelector::All)));
+    if (labelContainer)
+    {
+        script->setVariable("player1_cps", rift::Value::integer(labelContainer->getCPS(NoclipPlayerSelector::Player1)));
+        script->setVariable("player2_cps", rift::Value::integer(labelContainer->getCPS(NoclipPlayerSelector::Player2)));
+        script->setVariable("total_cps", rift::Value::integer(labelContainer->getCPS(NoclipPlayerSelector::All)));
+
+        script->setVariable("player1_max_cps", rift::Value::integer(labelContainer->getHighestCPS(NoclipPlayerSelector::Player1)));
+        script->setVariable("player2_max_cps", rift::Value::integer(labelContainer->getHighestCPS(NoclipPlayerSelector::Player2)));
+        script->setVariable("max_cps", rift::Value::integer(labelContainer->getHighestCPS(NoclipPlayerSelector::All)));
+
+        script->setVariable("player1_clicks", rift::Value::integer(labelContainer->getTotalClicks(NoclipPlayerSelector::Player1)));
+        script->setVariable("player2_clicks", rift::Value::integer(labelContainer->getTotalClicks(NoclipPlayerSelector::Player2)));
+        script->setVariable("total_clicks", rift::Value::integer(labelContainer->getTotalClicks(NoclipPlayerSelector::All)));
+    }
 
     script->setVariable("session_seconds", rift::Value::integer(seconds.count()));
     script->setVariable("session_minutes", rift::Value::integer(minutes.count()));
     script->setVariable("session_hours", rift::Value::integer(hours.count()));
 
-    script->setVariable("clock_seconds", rift::Value::integer(localTime->tm_sec));
-    script->setVariable("clock_minutes", rift::Value::integer(localTime->tm_min));
-    script->setVariable("clock_hours", rift::Value::integer(localTime->tm_hour));
+    script->setVariable("clock_seconds", rift::Value::integer(cachedLocalTime.tm_sec));
+    script->setVariable("clock_minutes", rift::Value::integer(cachedLocalTime.tm_min));
+    script->setVariable("clock_hours", rift::Value::integer(cachedLocalTime.tm_hour));
 
     script->setVariable("isEditor", rift::Value::boolean(LevelEditorLayer::get()));
-    script->setVariable("isLevel", rift::Value::boolean(PlayLayer::get()));
+    script->setVariable("isLevel", rift::Value::boolean(playLayer));
 
     script->setVariable("noclip_deaths", rift::Value::integer(noclipBGL->getNoclipDeaths(NoclipPlayerSelector::All)));
     script->setVariable("noclip_accuracy", rift::Value::floating(noclipBGL->getNoclipAccuracy(NoclipPlayerSelector::All) * 100));
@@ -163,7 +200,7 @@ void TextLabelNode::updateVariables()
     script->setVariable("player2_noclip_deaths", rift::Value::integer(noclipBGL->getNoclipDeaths(NoclipPlayerSelector::Player2)));
     script->setVariable("player2_noclip_accuracy", rift::Value::floating(noclipBGL->getNoclipAccuracy(NoclipPlayerSelector::Player2) * 100));
 
-    if (auto lvl = GJBaseGameLayer::get()->m_level)
+    if (auto lvl = gameLayer->m_level)
     {
         script->setVariable("level_name", rift::Value::string(lvl->m_levelName));
         script->setVariable("level_creator", rift::Value::string(lvl->m_creatorName.empty() ? "RobTop" : lvl->m_creatorName));
@@ -178,18 +215,20 @@ void TextLabelNode::updateVariables()
         script->setVariable("level_version", rift::Value::integer(lvl->m_levelVersion));
         script->setVariable("level_game_version", rift::Value::integer(lvl->m_gameVersion));
 
-        script->setVariable("normal_best", rift::Value::integer(GJBaseGameLayer::get()->m_level->m_normalPercent.value()));
-        script->setVariable("practice_best", rift::Value::integer(GJBaseGameLayer::get()->m_level->m_practicePercent));
+        script->setVariable("normal_best", rift::Value::integer(lvl->m_normalPercent.value()));
+        script->setVariable("practice_best", rift::Value::integer(lvl->m_practicePercent));
     }
 
-    if (PlayLayer::get())
+    if (playLayer)
     {
-        script->setVariable("bestRun_from", rift::Value::floating(static_cast<BestPlayLayer*>(PlayLayer::get())->m_fields->bestFrom));
-        script->setVariable("bestRun_to", rift::Value::floating(static_cast<BestPlayLayer*>(PlayLayer::get())->m_fields->bestTo));
-        script->setVariable("percentage", rift::Value::floating(PlayLayer::get()->getCurrentPercent()));
-        script->setVariable("last_percentage", rift::Value::floating(static_cast<BestPlayLayer*>(PlayLayer::get())->m_fields->lastPercent));
-        script->setVariable("run_from", rift::Value::floating(static_cast<BestPlayLayer*>(PlayLayer::get())->m_fields->fromPercent));
-        script->setVariable("isPractice", rift::Value::boolean(PlayLayer::get()->m_isPracticeMode));
+        auto bestPlayLayer = static_cast<BestPlayLayer*>(playLayer);
+
+        script->setVariable("bestRun_from", rift::Value::floating(bestPlayLayer->m_fields->bestFrom));
+        script->setVariable("bestRun_to", rift::Value::floating(bestPlayLayer->m_fields->bestTo));
+        script->setVariable("percentage", rift::Value::floating(playLayer->getCurrentPercent()));
+        script->setVariable("last_percentage", rift::Value::floating(bestPlayLayer->m_fields->lastPercent));
+        script->setVariable("run_from", rift::Value::floating(bestPlayLayer->m_fields->fromPercent));
+        script->setVariable("isPractice", rift::Value::boolean(playLayer->m_isPracticeMode));
     }
 }
 
