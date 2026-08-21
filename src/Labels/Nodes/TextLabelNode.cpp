@@ -41,8 +41,14 @@ void TextLabelNode::update(float dt)
 {
     if (!isActionActive())
     {
-        label->setOpacity(config.opacity * 255);
-        label->setColor(getDesiredColour());
+        const auto desiredOpacity = static_cast<GLubyte>(config.opacity * 255);
+        if (label->getOpacity() != desiredOpacity)
+            label->setOpacity(desiredOpacity);
+
+        const auto desiredColour = getDesiredColour();
+        const auto currentColour = label->getColor();
+        if (currentColour.r != desiredColour.r || currentColour.g != desiredColour.g || currentColour.b != desiredColour.b)
+            label->setColor(desiredColour);
     }
 
     std::string str = "Error";
@@ -65,7 +71,7 @@ void TextLabelNode::update(float dt)
     label->setString(str.c_str());
     this->setContentSize(label->getScaledContentSize());
 
-    auto const& visibleLabels = label->getVisibleLabels();
+    auto visibleLabels = label->getVisibleLabels();
     if (visibleLabels.size() == 1 && str == ".")
     {
         auto anchorX = LabelManager::get()->anchorToPoint(config.anchor).x;
