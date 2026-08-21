@@ -48,7 +48,12 @@ bool IconicPlayerHook::init()
 
 void IconicPlayerHook::update(float dt)
 {
-    if (IconicManager::get()->areIncompatibleModsLoaded())
+    auto manager = IconicManager::get();
+
+    // Iconic hooks exist for players even when the user has not enabled a
+    // single Iconic override. Keep that default path effectively dormant
+    // instead of rewriting icon, vehicle and trail colours every frame.
+    if (!manager->hasAnyOverrides() || manager->areIncompatibleModsLoaded())
         return;
 
     if (config)
@@ -66,8 +71,8 @@ void IconicPlayerHook::update(float dt)
         {
             if (player->m_isShip)
             {
-                config = IconicManager::get()->getConfig(player->m_isPlatformer ? IconicGamemodeType::Jetpack : IconicGamemodeType::Ship, player2);
-                auto config2 = IconicManager::get()->getConfig(IconicGamemodeType::Cube, player2);
+                config = manager->getConfig(player->m_isPlatformer ? IconicGamemodeType::Jetpack : IconicGamemodeType::Ship, player2);
+                auto config2 = manager->getConfig(IconicGamemodeType::Cube, player2);
 
                 player->setColor(config2->getPrimary());
                 player->setSecondColor(config2->getSecondary());
@@ -79,8 +84,8 @@ void IconicPlayerHook::update(float dt)
             }
             else if (player->m_isBird)
             {
-                config = IconicManager::get()->getConfig(IconicGamemodeType::Bird, player2);
-                auto config2 = IconicManager::get()->getConfig(IconicGamemodeType::Cube, player2);
+                config = manager->getConfig(IconicGamemodeType::Bird, player2);
+                auto config2 = manager->getConfig(IconicGamemodeType::Cube, player2);
 
                 player->setColor(config2->getPrimary());
                 player->setSecondColor(config2->getSecondary());
@@ -93,17 +98,17 @@ void IconicPlayerHook::update(float dt)
             else
             {
                 if (player->m_isBall)
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Ball, player2);
+                    config = manager->getConfig(IconicGamemodeType::Ball, player2);
                 else if (player->m_isDart)
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Dart, player2);
+                    config = manager->getConfig(IconicGamemodeType::Dart, player2);
                 else if (player->m_isRobot)
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Robot, player2);
+                    config = manager->getConfig(IconicGamemodeType::Robot, player2);
                 else if (player->m_isSpider)
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Spider, player2);
+                    config = manager->getConfig(IconicGamemodeType::Spider, player2);
                 else if (player->m_isSwing)
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Swing, player2);
+                    config = manager->getConfig(IconicGamemodeType::Swing, player2);
                 else
-                    config = IconicManager::get()->getConfig(IconicGamemodeType::Cube, player2);
+                    config = manager->getConfig(IconicGamemodeType::Cube, player2);
 
                 player->setColor(config->getPrimary());
                 player->setSecondColor(config->getSecondary());
@@ -136,7 +141,7 @@ void IconicPlayerHook::update(float dt)
                     player->m_waveTrail->updateStroke(1);
             }
 
-            if (IconicManager::get()->isFineOutlineLoaded())
+            if (manager->isFineOutlineLoaded())
             {
                 alpha::fine_outline::setOutlineColor(player, config->getFineOutline());
             }

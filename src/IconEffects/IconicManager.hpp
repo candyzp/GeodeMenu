@@ -27,6 +27,7 @@ class IconicManager
         bool getSeperateColours();
         void setSeperateColours(bool v);
 
+        bool hasAnyOverrides();
         bool areIncompatibleModsLoaded();
         std::vector<geode::Mod*> getIncompatibleMods();
         void handleIncompatibility(std::string id);

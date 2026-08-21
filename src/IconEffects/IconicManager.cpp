@@ -53,6 +53,13 @@ void IconicManager::setup()
     
     fineOutline = Loader::get()->getLoadedMod("alphalaneous.fine_outline");
 
+    // Load all icon configs once when the game finishes loading. Previously a
+    // new gamemode could lazily allocate/load its config on the first gameplay
+    // frame that used it, which is exactly where a small mode-switch spike is
+    // most noticeable.
+    for (int i = static_cast<int>(IconicGamemodeType::Cube); i <= static_cast<int>(IconicGamemodeType::Swing); i++)
+        getConfig(static_cast<IconicGamemodeType>(i), false);
+
     handleIncompatibility("rooot.custom-gamemode-colors");
     handleIncompatibility("gdemerald.custom_icon_colors");
     handleIncompatibility("capeling.coloured-wave-trail");
@@ -79,6 +86,19 @@ void IconicManager::setDualMode(IconicDualMode mode)
     parent["dual-mode"] = (int)mode;
 
     Mod::get()->setSavedValue<matjson::Value>("iconic-config", parent);
+}
+
+bool IconicManager::hasAnyOverrides()
+{
+    for (auto const& entry : configs)
+    {
+        auto const& pair = entry.second;
+
+        if ((pair.first && pair.first->hasAnyOverride()) || (pair.second && pair.second->hasAnyOverride()))
+            return true;
+    }
+
+    return false;
 }
 
 bool IconicManager::areIncompatibleModsLoaded()

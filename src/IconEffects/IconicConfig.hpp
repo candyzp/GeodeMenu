@@ -35,6 +35,12 @@ class IconicConfig
 
         cocos2d::ccColor3B getDefault(IconicEffectType type);
 
+        bool hasAnyOverride() const
+        {
+            return primaryEnabled || secondaryEnabled || glowEnabled || trailEnabled || ghostEnabled ||
+                waveTrailEnabled || dashFireEnabled || spiderTeleportEnabled || fineOutlineEnabled;
+        }
+
         cocos2d::ccColor3B getPrimary(bool ignoreP2 = false);
         cocos2d::ccColor3B getSecondary(bool ignoreP2 = false);
         cocos2d::ccColor3B getGlow();
