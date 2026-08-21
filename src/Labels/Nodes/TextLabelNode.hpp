@@ -9,6 +9,8 @@ class TextLabelNode : public LabelNode
     protected:
         AdvLabelBMFont* label = nullptr;
         rift::Script* script = nullptr;
+        std::string lastRenderedText = "";
+        bool textDirty = true;
 
         ~TextLabelNode();
 
