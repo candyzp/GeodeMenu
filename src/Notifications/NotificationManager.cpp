@@ -32,23 +32,36 @@ void NotificationManager::notifyToast(std::string toastStr, float time)
 
 void NotificationManager::removeNotification(NotificationNode* node)
 {
-    node->removeFromParent();
-    delete node;
+    if (node)
+        node->removeFromParent();
 }
 
 void NotificationManager::update(float dt)
 {
+    const auto childCount = getChildrenCount();
+
+    // This manager is scheduled for the entire session. With no active toast
+    // there is nothing to animate or lay out, so keep the idle path empty.
+    if (childCount == 0)
+    {
+        if (getPositionY() != 0)
+            setPositionY(0);
+
+        return;
+    }
+
     dt = Speedhack::get()->getRealDeltaTime();
     bool right = NotificationsRight::get()->getRealEnabled();
+    auto winSize = CCDirector::get()->getWinSize();
 
     float y = 0;
     int i = 0;
     for (auto node : CCArrayExt<NotificationNode*>(getChildren()))
     {
-        node->setPosition(ccp(right ? CCDirector::get()->getWinSize().width - 5 : 5, CCDirector::get()->getWinSize().height - 5 + y));
+        node->setPosition(ccp(right ? winSize.width - 5 : 5, winSize.height - 5 + y));
         node->setAnchorPoint(ccp(right ? 1 : 0, 1));
 
-        if (i != getChildrenCount() - 1)
+        if (i != childCount - 1)
             y += node->getScaledContentHeight() + 5;
 
         i++;
