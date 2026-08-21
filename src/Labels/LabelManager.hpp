@@ -11,7 +11,7 @@ class LabelManager
     protected:
         std::vector<LabelConfig> configs = {};
         std::chrono::steady_clock::time_point sessionBegin;
-        float fps;
+        float fps = 0.0f;
         float _updateInterval = 0.5f;
         float _timeLeft = _updateInterval;
         float _accum = 0;
