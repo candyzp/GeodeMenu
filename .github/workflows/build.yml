@@ -24,7 +24,7 @@ jobs:
           os: macos-latest
         - name: iOS
           os: macos-latest
-          target: iOS        
+          target: iOS
 
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.os }}
@@ -35,17 +35,60 @@ jobs:
           submodules: true
           fetch-depth: 0
 
+      # Keep the custom bindings deterministic and patch their code generator
+      # before Geode consumes them. The current bindings describe
+      # CCKeyboardDispatcher as available on iOS while its ctor/dtor have no
+      # iOS address. Older codegen emits `GEODE_APPLY_MODIFY_FOR_DESTRUCTOR(,`.
+      - name: Checkout custom bindings
+        uses: actions/checkout@v4
+        with:
+          repository: TheSillyDoggo/bindings
+          ref: 257e09bff1f86c34ac06614dc9e39a120c78c074
+          path: bindings-repo
+
+      - name: Patch missing iOS ctor/dtor addresses in codegen
+        if: matrix.config.target == 'iOS'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("bindings-repo/codegen/src/ModifyGen.cpp")
+          text = path.read_text()
+
+          parameter_line = "            auto parameter_types = codegen::getParameterTypes(fn->prototype);\n"
+          address_line = '                fmt::arg("address_inline", codegen::getAddressString(c, f)),\n'
+
+          if text.count(parameter_line) != 1 or text.count(address_line) != 1:
+              raise SystemExit("Expected ModifyGen.cpp codegen block was not found exactly once; refusing a blind patch")
+
+          guard = '''            const auto address = codegen::getAddressString(c, f);
+            // Some platform-specific constructors/destructors are declared in
+            // the bindings without an address. Do not emit an invalid modify
+            // macro such as GEODE_APPLY_MODIFY_FOR_DESTRUCTOR(, ...).
+            if ((fn->prototype.type == FunctionType::Ctor || fn->prototype.type == FunctionType::Dtor) && address.empty()) {
+                continue;
+            }
+
+          '''
+
+          text = text.replace(parameter_line, guard + parameter_line, 1)
+          text = text.replace(address_line, '                fmt::arg("address_inline", address),\n', 1)
+          path.write_text(text)
+          PY
+
       - name: Build the mod
         uses: geode-sdk/build-geode-mod@main
+        env:
+          GEODE_BINDINGS_REPO_PATH: ${{ github.workspace }}/bindings-repo
         with:
-          bindings: 'TheSillyDoggo/bindings'
           #build-config: 'RelWithDebInfo'
           build-config: 'Release'
           export-pdb: true
           combine: true
           #sdk: 'nightly'
           target: ${{ matrix.config.target }}
-      
+
   package:
     name: Package builds
     runs-on: ubuntu-latest

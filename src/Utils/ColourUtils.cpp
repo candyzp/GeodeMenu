@@ -85,7 +85,7 @@ float ColourUtils::getChannelValue(Channel channel)
 
 ccColor3B ColourConfig::colourForConfig(std::string channel)
 {
-    ColourUtils::get()->setChannelSpeed(channel, chromaSpeed);
+    auto colourUtils = ColourUtils::get();
 
     switch (type)
     {
@@ -102,13 +102,16 @@ ccColor3B ColourConfig::colourForConfig(std::string channel)
             return ColourUtils::invertColour(GameManager::get()->colorForIdx(GameManager::get()->m_playerGlowColor.value()), inverted);
 
         case Chroma:
-            return ColourUtils::invertColour(ColourUtils::get()->getChroma(channel), inverted);
+            colourUtils->setChannelSpeed(channel, chromaSpeed);
+            return ColourUtils::invertColour(colourUtils->getChroma(channel), inverted);
 
         case Pastel:
-            return ColourUtils::invertColour(ColourUtils::get()->getPastel(channel), inverted);
+            colourUtils->setChannelSpeed(channel, chromaSpeed);
+            return ColourUtils::invertColour(colourUtils->getPastel(channel), inverted);
 
         case Gradient:
-            return ColourUtils::invertColour(colourForGradient(ColourUtils::get()->getLoopedValue(ColourUtils::get()->getChannelValue(channel), loopGradient)), inverted);
+            colourUtils->setChannelSpeed(channel, chromaSpeed);
+            return ColourUtils::invertColour(colourForGradient(colourUtils->getLoopedValue(colourUtils->getChannelValue(channel), loopGradient)), inverted);
         
         default:
             return ccWHITE;
@@ -117,50 +120,50 @@ ccColor3B ColourConfig::colourForConfig(std::string channel)
 
 ccColor3B ColourConfig::colourForGradient(float v)
 {
+    if (gradientLocations.empty())
+        return ccWHITE;
+
     if (gradientLocations.size() == 1)
         return gradientLocations[0].colour;
 
-    if (gradientLocations.size() >= 2)
+    // This function can be sampled every frame by animated icon/GUI effects.
+    // The old path copied and sorted the entire gradient vector on every call.
+    // Find the nearest stops directly instead: O(n), allocation-free, and it
+    // also works when the editor leaves the vector unsorted.
+    const GradientLocation* lower = nullptr;
+    const GradientLocation* upper = nullptr;
+
+    for (const auto& location : gradientLocations)
     {
-        auto gl = gradientLocations;
-        std::sort(gl.begin(), gl.end(), [](GradientLocation a, GradientLocation b)
+        if (location.percentageLocation <= v &&
+            (!lower || location.percentageLocation > lower->percentageLocation))
         {
-            return a.percentageLocation < b.percentageLocation;
-        });
-
-        for (size_t i = 1; i < gl.size(); i++)
-        {
-            GradientLocation prev = gl[i - 1];
-            GradientLocation cur = gl[i];
-
-            float va = cur.percentageLocation - prev.percentageLocation;
-
-            if (v >= prev.percentageLocation && v <= cur.percentageLocation)
-            {
-                auto percent = (v - prev.percentageLocation) / va;
-
-                if (smoothGradient)
-                {
-                    return ColourUtils::get()->lerpColour(prev.colour, cur.colour, percent);
-                }
-                else
-                {
-                    if (percent >= 0.5f)
-                        return cur.colour;
-                    else
-                        return prev.colour;
-                }
-            }
+            lower = &location;
         }
 
-        if (gl[0].percentageLocation > v)
-            return gl[0].colour;
-
-        if (gl[gl.size() - 1].percentageLocation < v)
-            return gl[gl.size() - 1].colour;
+        if (location.percentageLocation >= v &&
+            (!upper || location.percentageLocation < upper->percentageLocation))
+        {
+            upper = &location;
+        }
     }
 
-    return ccWHITE;
+    if (!lower)
+        return upper ? upper->colour : ccWHITE;
+
+    if (!upper)
+        return lower->colour;
+
+    const float range = upper->percentageLocation - lower->percentageLocation;
+    if (range <= 0.0f)
+        return lower->colour;
+
+    const float percent = (v - lower->percentageLocation) / range;
+
+    if (smoothGradient)
+        return ColourUtils::get()->lerpColour(lower->colour, upper->colour, percent);
+
+    return percent >= 0.5f ? upper->colour : lower->colour;
 }
 
 matjson::Value ColourConfig::toJson()
