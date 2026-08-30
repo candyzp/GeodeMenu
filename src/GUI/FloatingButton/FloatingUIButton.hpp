@@ -36,6 +36,7 @@ class FloatingUIButton : public cocos2d::CCNode
         cocos2d::CCSprite* overlaySpr = nullptr;
         bool isMoving = false;
         float _opacity = 0.8f;
+        int lastAppliedOpacity = -1;
         cocos2d::CCPoint position = cocos2d::CCPointZero;
         bool isSelected = false;
         FloatingButtonAnimationType animation = FloatingButtonAnimationType::Shrink;
