@@ -47,8 +47,8 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         self->timeTilNextTick = 0;
         self->progressTilNextTick = 0;
         self->modifiedDeltaReturn = 0;
-        self->lastCamPos2 = {0, 0};
-        self->lastCamPos = {0, 0};
+        self->lastCamPos2 = CCPointZero;
+        self->lastCamPos = CCPointZero;
         self->hasCameraHistory = false;
     }
 
@@ -163,8 +163,8 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
             auto endCamPos = self->lastCamPos + (self->lastCamPos - self->lastCamPos2);
 
             m_objectLayer->setPosition(
-                std::lerp<double>(self->lastCamPos.x, endCamPos.x, percent),
-                std::lerp<double>(self->lastCamPos.y, endCamPos.y, percent)
+                self->lastCamPos.x + (endCamPos.x - self->lastCamPos.x) * percent,
+                self->lastCamPos.y + (endCamPos.y - self->lastCamPos.y) * percent
             );
         }
 
@@ -202,15 +202,14 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         float endRot = ((player->m_rotationSpeed * rotateSpeed) / 240.0f);
 
         player->CCNode::setPosition(ccp(
-            std::lerp<double>(player->m_position.x, endXPos, percent),
-            std::lerp<double>(player->m_position.y, endYPos, percent)
+            player->m_position.x + (endXPos - player->m_position.x) * percent,
+            player->m_position.y + (endYPos - player->m_position.y) * percent
         ));
 
         if (player->m_mainLayer)
         {
             player->m_mainLayer->setRotation(
-                std::lerp(0.0, static_cast<double>(endRot), static_cast<double>(percent))
-                + playerGetRotatedHitbox(player)
+                endRot * percent + playerGetRotatedHitbox(player)
             );
         }
     }
@@ -233,7 +232,7 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         {
             if (typeinfo_cast<CCSpriteBatchNode*>(child))
             {
-                child->setPositionX(std::lerp<double>(0.0, static_cast<double>(moveBy), static_cast<double>(percent)));
+                child->setPositionX(moveBy * percent);
             }
         }
     }
