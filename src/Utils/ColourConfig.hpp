@@ -30,7 +30,7 @@ struct ColourConfig
     bool inverted = false;
     bool loopGradient = true;
 
-    cocos2d::ccColor3B colourForConfig(std::string channel);
+    cocos2d::ccColor3B colourForConfig(std::string const& channel);
     cocos2d::ccColor3B colourForGradient(float v);
 
     matjson::Value toJson();
