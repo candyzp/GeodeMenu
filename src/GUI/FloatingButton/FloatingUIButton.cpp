@@ -40,29 +40,20 @@ bool FloatingUIButton::init()
 
 bool FloatingUIButtonVisibility::shouldShow()
 {
-    if (auto pl = PlayLayer::get())
+    if (PlayLayer::get())
     {
-        if (CCScene::get()->getChildByType<PauseLayer>(0) && showInPauseMenu)
-            return true;
-
-        if (!CCScene::get()->getChildByType<PauseLayer>(0) && showInGame)
-            return true;
-    }
-    else if (auto ed = LevelEditorLayer::get())
-    {
-        if (ed->getChildByType<EditorPauseLayer>(0) && showInEditorPauseMenu)
-            return true;
-
-        if (!ed->getChildByType<EditorPauseLayer>(0) && showInEditor)
-            return true;
-    }
-    else
-    {
-        if (showInMenu)
-            return true;
+        auto scene = CCScene::get();
+        const bool paused = scene && scene->getChildByType<PauseLayer>(0);
+        return paused ? showInPauseMenu : showInGame;
     }
 
-    return false;
+    if (auto ed = LevelEditorLayer::get())
+    {
+        const bool paused = ed->getChildByType<EditorPauseLayer>(0);
+        return paused ? showInEditorPauseMenu : showInEditor;
+    }
+
+    return showInMenu;
 }
 
 void FloatingUIButton::updateSprites(std::string background, std::string overlay, bool backgroundSpriteSheet, bool overlaySpriteSheet)
@@ -82,6 +73,7 @@ void FloatingUIButton::updateSprites()
 
     this->removeAllChildren();
     overlaySpr = nullptr;
+    lastAppliedOpacity = -1;
 
     if (!background.empty())
     {
@@ -126,15 +118,16 @@ void FloatingUIButton::updateSprites()
 
 void FloatingUIButton::update(float dt)
 {
-    auto v = visibilityConf.shouldShow();
+    const bool v = visibilityConf.shouldShow();
 
-    this->setVisible(v);
+    if (isVisible() != v)
+        this->setVisible(v);
 
     if (!v)
         return;
 
     dt = Speedhack::get()->getRealDeltaTime();
-    float t = 10 * dt;
+    const float t = std::min(1.0f, 10.0f * dt);
 
     this->setPosition(ccp(
         std::lerp<double>(getPositionX(), position.x, t),
@@ -143,13 +136,21 @@ void FloatingUIButton::update(float dt)
 
     _opacity = std::lerp<double>(_opacity, isSelected ? 1.0f : opacity, t);
 
+    // Most frames the button opacity is unchanged at the byte level. Avoid
+    // walking every child and reapplying the exact same value in that case.
+    const int opacityByte = static_cast<int>(255 * _opacity);
+    if (lastAppliedOpacity == opacityByte)
+        return;
+
+    lastAppliedOpacity = opacityByte;
+
     for (auto child : CCArrayExt<CCNode*>(getChildren()))
     {
         if (!child->getUserObject("flag"_spr))
             continue;
 
         if (auto spr = typeinfo_cast<CCSprite*>(child))
-            spr->setOpacity(255 * _opacity);
+            spr->setOpacity(opacityByte);
     }
 }
 
@@ -226,6 +227,7 @@ void FloatingUIButton::setBaseOpacity(float opacity)
 
     _opacity = opacity;
     this->opacity = opacity;
+    lastAppliedOpacity = -1;
 }
 
 void FloatingUIButton::setAnimation(FloatingButtonAnimationType anim)
