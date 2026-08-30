@@ -23,6 +23,16 @@ ModuleShortcutButton* ModuleShortcutButton::create(Module* module)
 
 void ModuleShortcutButton::setup()
 {
+    shortcutConfig = mod->getShortcutConfig();
+
+    // These strings never change for a shortcut node. Building them once avoids
+    // fmt/string allocation work in update() and while dragging the button.
+    const auto moduleID = mod->getID();
+    colourChannel = moduleID + "_shortcut";
+    shortcutPosXKey = moduleID + "_shortcutpos.x";
+    shortcutPosYKey = moduleID + "_shortcutpos.y";
+
+    lastUpdated = mod->shouldShortcutShowActivated();
     updateSprs();
 
     this->setOnClick([this]
@@ -47,8 +57,8 @@ void ModuleShortcutButton::setup()
     );
     
     auto pos = ccp(
-        Mod::get()->getSavedValue<float>(fmt::format("{}_shortcutpos.x", mod->getID()), def.x),
-        Mod::get()->getSavedValue<float>(fmt::format("{}_shortcutpos.y", mod->getID()), def.y)
+        Mod::get()->getSavedValue<float>(shortcutPosXKey, def.x),
+        Mod::get()->getSavedValue<float>(shortcutPosYKey, def.y)
     );
 
     this->updatePosition(pos);
@@ -69,8 +79,8 @@ void ModuleShortcutButton::updatePosition(cocos2d::CCPoint point)
     FloatingUIButton::updatePosition(point);
     position = point;
 
-    Mod::get()->setSavedValue<float>(fmt::format("{}_shortcutpos.x", mod->getID()), point.x);
-    Mod::get()->setSavedValue<float>(fmt::format("{}_shortcutpos.y", mod->getID()), point.y);
+    Mod::get()->setSavedValue<float>(shortcutPosXKey, point.x);
+    Mod::get()->setSavedValue<float>(shortcutPosYKey, point.y);
 }
 
 void ModuleShortcutButton::updateSprs()
@@ -96,14 +106,21 @@ void ModuleShortcutButton::setBackgroundSprites(std::string bgOff, std::string b
 
 void ModuleShortcutButton::update(float dt)
 {
-    if (lastUpdated != mod->shouldShortcutShowActivated())
+    const bool activated = mod->shouldShortcutShowActivated();
+
+    if (lastUpdated != activated)
     {
-        lastUpdated = mod->shouldShortcutShowActivated();
+        lastUpdated = activated;
         updateSprs();
     }
     
     FloatingUIButton::update(dt);
 
+    // FloatingUIButton already decided this shortcut is hidden. Skip animated
+    // colour work entirely until it is actually visible again.
+    if (!isVisible())
+        return;
+
     if (overlaySpr)
-        overlaySpr->setColor(mod->getShortcutConfig().colour.colourForConfig(fmt::format("{}_shortcut", mod->getID())));
+        overlaySpr->setColor(shortcutConfig.colour.colourForConfig(colourChannel));
 }
