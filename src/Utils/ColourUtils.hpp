@@ -18,7 +18,7 @@ class ColourUtils
         std::unordered_map<Channel, float> speeds = {};
 
         void update(float dt);
-        void addChannel(Channel channel);
+        void addChannel(Channel const& channel);
 
     public:
         static ColourUtils* get();
@@ -28,10 +28,10 @@ class ColourUtils
         ccColor3B lerpColour(const ccColor3B& color1, const ccColor3B& color2, float t);
         static ccColor3B invertColour(const ccColor3B& colour, bool inv = true);
 
-        void setChannelSpeed(Channel channel, float speed);
+        void setChannelSpeed(Channel const& channel, float speed);
         float getLoopedValue(float value, bool backAndForth);
 
-        ccColor3B getChroma(Channel channel);
-        ccColor3B getPastel(Channel channel);
-        float getChannelValue(Channel channel);
+        ccColor3B getChroma(Channel const& channel);
+        ccColor3B getPastel(Channel const& channel);
+        float getChannelValue(Channel const& channel);
 };
