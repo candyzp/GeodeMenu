@@ -28,62 +28,66 @@ void ColourUtils::setup()
 void ColourUtils::update(float dt)
 {
     #ifdef QOLMOD_SEPERATE_COLOURS
-    for (size_t i = 0; i < channels.size(); i++)
+    for (const auto& channel : channels)
     {
-        values[channels[i]] += dt * speeds[channels[i]];
+        auto valueIt = values.find(channel);
+        auto speedIt = speeds.find(channel);
+
+        if (valueIt != values.end() && speedIt != speeds.end())
+            valueIt->second += dt * speedIt->second;
     }
     #else
     globalValue += dt;
     #endif
 }
 
-void ColourUtils::addChannel(Channel channel)
+void ColourUtils::addChannel(Channel const& channel)
 {
-    if (values.contains(channel))
+    auto [valueIt, inserted] = values.emplace(channel, 0);
+    if (!inserted)
         return;
 
-    values.emplace(channel, 0);
     speeds.emplace(channel, 1);
     channels.push_back(channel);
 }
 
-ccColor3B ColourUtils::getChroma(Channel channel)
+ccColor3B ColourUtils::getChroma(Channel const& channel)
 {
-    if (!values.contains(channel))
-        addChannel(channel);
+    addChannel(channel);
 
     return hsvToRgb(cchsv((getChannelValue(channel) * 180) / 10.0f, 1.0f, 1.0f, true, true));
 }
 
-ccColor3B ColourUtils::getPastel(Channel channel)
+ccColor3B ColourUtils::getPastel(Channel const& channel)
 {
-    if (!values.contains(channel))
-        addChannel(channel);
+    addChannel(channel);
 
     return hsvToRgb(cchsv((getChannelValue(channel) * 180) / 10.0f, 155.0f / 255.0f, 1.0f, true, true));
 }
 
-void ColourUtils::setChannelSpeed(Channel channel, float speed)
+void ColourUtils::setChannelSpeed(Channel const& channel, float speed)
 {
     addChannel(channel);
 
-    speeds[channel] = speed;
+    auto it = speeds.find(channel);
+    if (it != speeds.end())
+        it->second = speed;
 }
 
-float ColourUtils::getChannelValue(Channel channel)
+float ColourUtils::getChannelValue(Channel const& channel)
 {
     #ifdef QOLMOD_SEPERATE_COLOURS
-    if (values.contains(channel))
-        return values[channel];
+    if (auto it = values.find(channel); it != values.end())
+        return it->second;
     #else
-    if (speeds.contains(channel))
-        return globalValue * speeds[channel];
+    if (auto it = speeds.find(channel); it != speeds.end())
+        return globalValue * it->second;
     #endif
 
     return 0;
 }
 
-ccColor3B ColourConfig::colourForConfig(std::string channel)
+ccColor3B ColourConfig::colourForConfig(std::string const& channel)
 {
     auto colourUtils = ColourUtils::get();
 
