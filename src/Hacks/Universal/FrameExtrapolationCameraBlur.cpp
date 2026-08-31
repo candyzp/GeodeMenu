@@ -1,7 +1,9 @@
 #include "../../Client/Module.hpp"
 #include "../../Client/FloatSliderModule.hpp"
-#include <Geode/modify/CCDirector.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/CCDirector.hpp>
+#include <Geode/modify/CCEGLView.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -16,7 +18,7 @@ class FrameExtrapolationCameraBlur : public Module
         {
             setName("Camera Blur");
             setID("frame-extrapolation/camera-blur");
-            setDescription("Adds a temporal camera-only motion smear on top of the selected Frame Extrapolation method. Gameplay, the player sprite, and UI stay sharp.");
+            setDescription("Adds a camera-only motion trail on top of the selected smoothing method. The player stays sharp.");
         }
 };
 
@@ -25,9 +27,9 @@ class FrameExtrapolationCameraBlurStrength : public FloatSliderModule
     public:
         MODULE_SETUP(FrameExtrapolationCameraBlurStrength)
         {
-            setName("Blur Strength");
+            setName("Amount");
             setID("frame-extrapolation/camera-blur/strength");
-            setDescription("How strongly the camera trails recent motion. 0 disables the visible smear while 1 uses the full trail response.");
+            setDescription("How strong the camera blur is. Higher values make camera motion trail farther behind.");
             setRange(0.0f, 1.0f);
             setDefaultValue(0.35f);
             setSnapValues({0.0f, 0.15f, 0.25f, 0.35f, 0.5f, 0.75f, 1.0f});
@@ -39,12 +41,12 @@ class FrameExtrapolationCameraBlurTrail : public FloatSliderModule
     public:
         MODULE_SETUP(FrameExtrapolationCameraBlurTrail)
         {
-            setName("Blur Trail");
+            setName("Length");
             setID("frame-extrapolation/camera-blur/trail-ms");
-            setDescription("Temporal length of the camera smear in milliseconds. Higher values leave a longer camera trail.");
-            setRange(0.0f, 100.0f);
-            setDefaultValue(32.0f);
-            setSnapValues({0.0f, 8.0f, 16.0f, 24.0f, 32.0f, 50.0f, 75.0f, 100.0f});
+            setDescription("How long the camera trail lasts. Higher values make the blur hang behind for longer.");
+            setRange(0.0f, 140.0f);
+            setDefaultValue(42.0f);
+            setSnapValues({0.0f, 16.0f, 24.0f, 32.0f, 42.0f, 60.0f, 90.0f, 120.0f, 140.0f});
         }
 };
 
@@ -53,26 +55,20 @@ class FrameExtrapolationCameraBlurMaxSmear : public FloatSliderModule
     public:
         MODULE_SETUP(FrameExtrapolationCameraBlurMaxSmear)
         {
-            setName("Max Smear");
+            setName("Max Blur");
             setID("frame-extrapolation/camera-blur/max-smear");
-            setDescription("Maximum camera-only trail distance in game units. This prevents portals, respawns, and camera snaps from creating a giant streak.");
-            setRange(0.0f, 24.0f);
-            setDefaultValue(8.0f);
-            setSnapValues({0.0f, 2.0f, 4.0f, 6.0f, 8.0f, 12.0f, 16.0f, 24.0f});
+            setDescription("Maximum distance the camera trail may reach. This prevents portals and respawns from creating giant jumps.");
+            setRange(0.0f, 64.0f);
+            setDefaultValue(12.0f);
+            setSnapValues({0.0f, 4.0f, 8.0f, 12.0f, 16.0f, 24.0f, 32.0f, 48.0f, 64.0f});
         }
 };
 
 namespace
 {
-    struct CameraBlurRuntime
-    {
-        PlayLayer* owner = nullptr;
-        CCPoint camera = CCPointZero;
-        std::chrono::steady_clock::time_point lastDraw = {};
-        bool seeded = false;
-    };
-
-    CameraBlurRuntime g_cameraBlur;
+    std::chrono::steady_clock::time_point g_lastBlurPresent = {};
+    float g_blurPresentDt = 1.0f / 60.0f;
+    unsigned long long g_blurPresentSerial = 0;
 
     CCPoint addPoint(CCPoint const& a, CCPoint const& b)
     {
@@ -135,11 +131,6 @@ namespace
         }
     }
 
-    void resetCameraBlur()
-    {
-        g_cameraBlur = {};
-    }
-
     void ensureCameraBlurOptionsRegistered()
     {
         static bool registered = false;
@@ -164,122 +155,195 @@ namespace
         return parent && parent->getRealEnabled() && FrameExtrapolationCameraBlur::get()->getRealEnabled();
     }
 
-    float getFrameDt(std::chrono::steady_clock::time_point now)
+    void onBlurPresentedFrame()
     {
-        if (g_cameraBlur.lastDraw == std::chrono::steady_clock::time_point{})
+        auto now = std::chrono::steady_clock::now();
+        if (g_lastBlurPresent != std::chrono::steady_clock::time_point{})
         {
-            g_cameraBlur.lastDraw = now;
-            return 1.0f / 60.0f;
+            float measured = std::chrono::duration<float>(now - g_lastBlurPresent).count();
+            if (std::isfinite(measured) && measured > 0.0f)
+                g_blurPresentDt = std::clamp(measured, 1.0f / 1000.0f, 1.0f / 15.0f);
         }
 
-        float dt = std::chrono::duration<float>(now - g_cameraBlur.lastDraw).count();
-        g_cameraBlur.lastDraw = now;
-
-        if (!std::isfinite(dt) || dt <= 0.0f)
-            return 1.0f / 60.0f;
-
-        return std::clamp(dt, 1.0f / 1000.0f, 1.0f / 20.0f);
+        g_lastBlurPresent = now;
+        ++g_blurPresentSerial;
     }
 }
 
-class $modify(FrameExtrapolationCameraBlurDrawHook, CCDirector)
+#ifdef GEODE_IS_ANDROID
+class $modify(FrameExtrapolationCameraBlurPresentHook, CCDirector)
 {
     void drawScene()
     {
+        CCDirector::drawScene();
+        onBlurPresentedFrame();
+    }
+};
+#else
+class $modify(FrameExtrapolationCameraBlurPresentHook, CCEGLView)
+{
+    void swapBuffers()
+    {
+        onBlurPresentedFrame();
+        CCEGLView::swapBuffers();
+    }
+};
+#endif
+
+class $modify(FrameExtrapolationCameraBlurGameLayer, GJBaseGameLayer)
+{
+    struct Fields
+    {
+        CCPoint filteredCamera = CCPointZero;
+        CCPoint previousTarget = CCPointZero;
+        CCPoint savedCamera = CCPointZero;
+        CCPoint savedPlayer1 = CCPointZero;
+        CCPoint savedPlayer2 = CCPointZero;
+        CCPoint appliedDelta = CCPointZero;
+
+        unsigned long long lastPresentSerial = 0;
+        bool seeded = false;
+        bool visualApplied = false;
+        bool compensatedPlayer1 = false;
+        bool compensatedPlayer2 = false;
+    };
+
+    static void onModify(auto& self)
+    {
+        // Restore our previous visual transform before every other update hook,
+        // then apply Camera Blur after every other update hook has finished.
+        // This guarantees the selected Frame Extrapolation method runs first.
+        if (!self.setHookPriorityPre("GJBaseGameLayer::update", Priority::First))
+            log::warn("Camera Blur: failed to set early restore priority");
+        if (!self.setHookPriorityPost("GJBaseGameLayer::update", Priority::Last))
+            log::warn("Camera Blur: failed to set late apply priority");
+    }
+
+    void restoreCameraBlurVisual()
+    {
+        auto self = m_fields.self();
+        if (!self->visualApplied)
+            return;
+
+        if (m_objectLayer)
+            m_objectLayer->setPosition(self->savedCamera);
+        if (m_player1 && self->compensatedPlayer1)
+            m_player1->CCNode::setPosition(self->savedPlayer1);
+        if (m_player2 && self->compensatedPlayer2)
+            m_player2->CCNode::setPosition(self->savedPlayer2);
+
+        shiftGround(m_groundLayer, -self->appliedDelta.x);
+        shiftGround(m_groundLayer2, -self->appliedDelta.x);
+
+        self->visualApplied = false;
+        self->appliedDelta = CCPointZero;
+    }
+
+    void resetCameraBlurState()
+    {
+        auto self = m_fields.self();
+        restoreCameraBlurVisual();
+        self->filteredCamera = CCPointZero;
+        self->previousTarget = CCPointZero;
+        self->lastPresentSerial = g_blurPresentSerial;
+        self->seeded = false;
+        self->compensatedPlayer1 = false;
+        self->compensatedPlayer2 = false;
+    }
+
+    void update(float dt)
+    {
+        auto self = m_fields.self();
+
+        // Never let a presentation-only camera offset leak into gameplay.
+        restoreCameraBlurVisual();
+
+        GJBaseGameLayer::update(dt);
+
         ensureCameraBlurOptionsRegistered();
 
-        auto playLayer = PlayLayer::get();
-        if (!cameraBlurEnabled() || !playLayer || !playLayer->m_objectLayer || !playLayer->isRunning())
+        auto playLayer = typeinfo_cast<PlayLayer*>(this);
+        if (!playLayer || !cameraBlurEnabled() || !m_objectLayer || !isRunning() || playLayer->m_levelEndAnimationStarted)
         {
-            resetCameraBlur();
-            CCDirector::drawScene();
+            if (self->seeded)
+                resetCameraBlurState();
             return;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        float dt = getFrameDt(now);
-        CCPoint targetCamera = playLayer->m_objectLayer->getPosition();
+        float amount = std::clamp(FrameExtrapolationCameraBlurStrength::get()->getValue(), 0.0f, 1.0f);
+        float lengthMs = std::clamp(FrameExtrapolationCameraBlurTrail::get()->getValue(), 0.0f, 140.0f);
+        float maxBlur = std::clamp(FrameExtrapolationCameraBlurMaxSmear::get()->getValue(), 0.0f, 64.0f);
 
-        if (g_cameraBlur.owner != playLayer)
+        CCPoint targetCamera = m_objectLayer->getPosition();
+
+        if (!self->seeded)
         {
-            resetCameraBlur();
-            g_cameraBlur.owner = playLayer;
-            g_cameraBlur.camera = targetCamera;
-            g_cameraBlur.lastDraw = now;
-            g_cameraBlur.seeded = true;
-            CCDirector::drawScene();
+            self->filteredCamera = targetCamera;
+            self->previousTarget = targetCamera;
+            self->lastPresentSerial = g_blurPresentSerial;
+            self->seeded = true;
             return;
         }
 
-        float strength = std::clamp(FrameExtrapolationCameraBlurStrength::get()->getValue(), 0.0f, 1.0f);
-        float trailMs = std::clamp(FrameExtrapolationCameraBlurTrail::get()->getValue(), 0.0f, 100.0f);
-        float maxSmear = std::clamp(FrameExtrapolationCameraBlurMaxSmear::get()->getValue(), 0.0f, 24.0f);
-
-        if (!g_cameraBlur.seeded || strength <= 0.0001f || trailMs <= 0.0001f || maxSmear <= 0.0001f)
+        if (amount <= 0.0001f || lengthMs <= 0.0001f || maxBlur <= 0.0001f)
         {
-            g_cameraBlur.camera = targetCamera;
-            g_cameraBlur.seeded = true;
-            CCDirector::drawScene();
+            self->filteredCamera = targetCamera;
+            self->previousTarget = targetCamera;
+            self->lastPresentSerial = g_blurPresentSerial;
             return;
         }
 
-        // Camera teleports and scene snaps should never be smeared across the
-        // screen. Reseed instead of dragging the old camera through the jump.
-        if (pointLength(subPoint(targetCamera, g_cameraBlur.camera)) > std::max(96.0f, maxSmear * 8.0f))
+        CCPoint targetJump = subPoint(targetCamera, self->previousTarget);
+        if (pointLength(targetJump) > std::max(128.0f, maxBlur * 6.0f))
         {
-            g_cameraBlur.camera = targetCamera;
-            CCDirector::drawScene();
+            // Portal, respawn, camera snap, or scene discontinuity.
+            self->filteredCamera = targetCamera;
+            self->previousTarget = targetCamera;
+            self->lastPresentSerial = g_blurPresentSerial;
             return;
         }
 
-        float trailSeconds = std::max(trailMs * 0.001f, 0.001f);
-        float baseFollow = 1.0f - std::exp(-dt / trailSeconds);
-        float follow = 1.0f - strength * (1.0f - baseFollow);
-        follow = std::clamp(follow, 0.0f, 1.0f);
-
-        g_cameraBlur.camera = addPoint(
-            g_cameraBlur.camera,
-            scalePoint(subPoint(targetCamera, g_cameraBlur.camera), follow)
-        );
-
-        CCPoint blurDelta = clampMagnitude(subPoint(g_cameraBlur.camera, targetCamera), maxSmear);
-        g_cameraBlur.camera = addPoint(targetCamera, blurDelta);
-
-        if (pointLength(blurDelta) <= 0.0001f)
+        if (self->lastPresentSerial != g_blurPresentSerial)
         {
-            CCDirector::drawScene();
-            return;
+            float lengthSeconds = std::max(lengthMs * 0.001f, 0.001f);
+            float normalFollow = 1.0f - std::exp(-g_blurPresentDt / lengthSeconds);
+
+            // Amount controls how much of the temporal lag is kept. At 1.0 the
+            // full trail is visible; at lower values the filter catches up more.
+            float follow = 1.0f - amount * (1.0f - normalFollow);
+            follow = std::clamp(follow, 0.0f, 1.0f);
+
+            self->filteredCamera = addPoint(
+                self->filteredCamera,
+                scalePoint(subPoint(targetCamera, self->filteredCamera), follow)
+            );
+            self->lastPresentSerial = g_blurPresentSerial;
         }
 
-        // Save the exact presentation transforms produced by the selected
-        // Frame Extrapolation method. Camera Blur is a draw-only bonus layer.
-        CCPoint originalCamera = targetCamera;
-        CCPoint originalPlayer1 = playLayer->m_player1 ? playLayer->m_player1->getPosition() : CCPointZero;
-        CCPoint originalPlayer2 = playLayer->m_player2 ? playLayer->m_player2->getPosition() : CCPointZero;
-        bool compensatePlayer1 = playLayer->m_player1 && isUnderObjectLayer(playLayer->m_player1, playLayer->m_objectLayer);
-        bool compensatePlayer2 = playLayer->m_player2 && isUnderObjectLayer(playLayer->m_player2, playLayer->m_objectLayer);
+        self->previousTarget = targetCamera;
 
-        playLayer->m_objectLayer->setPosition(addPoint(originalCamera, blurDelta));
+        CCPoint blurDelta = clampMagnitude(subPoint(self->filteredCamera, targetCamera), maxBlur);
+        if (pointLength(blurDelta) <= 0.01f)
+            return;
 
-        // Keep players sharp in screen space while the rest of the camera/world
-        // receives the temporal smear.
-        if (compensatePlayer1)
-            playLayer->m_player1->CCNode::setPosition(subPoint(originalPlayer1, blurDelta));
-        if (compensatePlayer2)
-            playLayer->m_player2->CCNode::setPosition(subPoint(originalPlayer2, blurDelta));
+        self->savedCamera = targetCamera;
+        self->savedPlayer1 = m_player1 ? m_player1->getPosition() : CCPointZero;
+        self->savedPlayer2 = m_player2 ? m_player2->getPosition() : CCPointZero;
+        self->compensatedPlayer1 = m_player1 && isUnderObjectLayer(m_player1, m_objectLayer);
+        self->compensatedPlayer2 = m_player2 && isUnderObjectLayer(m_player2, m_objectLayer);
+        self->appliedDelta = blurDelta;
 
-        shiftGround(playLayer->m_groundLayer, blurDelta.x);
-        shiftGround(playLayer->m_groundLayer2, blurDelta.x);
+        m_objectLayer->setPosition(addPoint(targetCamera, blurDelta));
 
-        CCDirector::drawScene();
+        // Blur only the camera/world. If a player is parented under the object
+        // layer, counter-shift it so its screen-space position stays sharp.
+        if (self->compensatedPlayer1)
+            m_player1->CCNode::setPosition(subPoint(self->savedPlayer1, blurDelta));
+        if (self->compensatedPlayer2)
+            m_player2->CCNode::setPosition(subPoint(self->savedPlayer2, blurDelta));
 
-        // Restore exactly what the selected extrapolation method had produced.
-        shiftGround(playLayer->m_groundLayer, -blurDelta.x);
-        shiftGround(playLayer->m_groundLayer2, -blurDelta.x);
-        if (compensatePlayer1)
-            playLayer->m_player1->CCNode::setPosition(originalPlayer1);
-        if (compensatePlayer2)
-            playLayer->m_player2->CCNode::setPosition(originalPlayer2);
-        playLayer->m_objectLayer->setPosition(originalCamera);
+        shiftGround(m_groundLayer, blurDelta.x);
+        shiftGround(m_groundLayer2, blurDelta.x);
+        self->visualApplied = true;
     }
 };
