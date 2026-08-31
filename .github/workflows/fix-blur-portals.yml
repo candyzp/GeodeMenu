@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply focused blur and portal fixes
-        run: python3 .github/scripts/fix_blur_portals.py
+        run: |
+          git show 79bd466c6f67fbb5fd2d2e390e31e16d465e0ef2:.github/scripts/fix_blur_portals.py > /tmp/fix_blur_portals.py
+          python3 /tmp/fix_blur_portals.py
 
       - name: Verify focused source changes
         run: |
@@ -42,13 +44,12 @@ jobs:
           path: output/*.geode
           if-no-files-found: error
 
-      - name: Commit focused fixes and remove temporary files
+      - name: Commit focused fixes and remove temporary workflow
         if: success()
         run: |
           rm -f .github/workflows/fix-blur-portals.yml
-          rm -f .github/scripts/fix_blur_portals.py
           git config user.name 'candyzp'
           git config user.email '166943815+candyzp@users.noreply.github.com'
-          git add src/Hacks/Universal/FrameExtrapolation.cpp .github/workflows/fix-blur-portals.yml .github/scripts/fix_blur_portals.py
+          git add src/Hacks/Universal/FrameExtrapolation.cpp .github/workflows/fix-blur-portals.yml
           git commit -m 'Fix camera blur rendering and portal transitions'
           git push origin HEAD:frame-timing-debugger
