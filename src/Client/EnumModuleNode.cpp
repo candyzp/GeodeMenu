@@ -43,9 +43,17 @@ void EnumModuleNode::updateNode()
     auto mod = static_cast<EnumModule*>(module);
     auto names = mod->getDisplayNames();
 
-    label->setString(LocalisationManager::get()->getLocalisedString(
-        fmt::format("enums/{}", names[mod->getValue()])
-    ).c_str());
+    auto rawName = names[mod->getValue()];
+    auto localisationKey = fmt::format("enums/{}", rawName);
+    auto displayName = LocalisationManager::get()->getLocalisedString(localisationKey);
+
+    // Custom enum values may not exist in the translation submodule yet.
+    // In that case use the readable value supplied by the module instead of
+    // showing a raw localisation key such as "enums/Adaptive Hybrid".
+    if (displayName == fmt::format("<ttf>{}", localisationKey))
+        displayName = rawName;
+
+    label->setString(displayName.c_str());
     label->limitLabelWidth(100, 0.5f, 0);
 
     updateButtonEnabled(leftBtn, (mod->getValue() != names.begin()->first));
