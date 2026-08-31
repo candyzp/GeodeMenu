@@ -39,17 +39,17 @@ class FrameExtrapolationMethodOption : public EnumModule
     public:
         MODULE_SETUP(FrameExtrapolationMethodOption)
         {
-            setName("Extrapolation Method");
+            setName("Method");
             // V2 intentionally uses a new saved-value key so the old AB/Hybrid
             // selection cannot silently map to a completely different method.
             setID("frame-extrapolation/method-v2");
-            setDescription("Selects one of five fundamentally different visual smoothing strategies used whenever Frame Extrapolation is enabled.");
+            setDescription("Choose how frames are smoothed. Classic predicts motion, Camera Sync keeps camera/player motion together, Snapshot blends real states, Spring softly follows motion, and Tracker estimates corrected motion.");
             listedValues = {
-                {(int)FrameExtrapolationMethod::LegacyLinear, "Legacy Linear"},
-                {(int)FrameExtrapolationMethod::CameraRelative, "Camera Relative"},
-                {(int)FrameExtrapolationMethod::SnapshotInterpolation, "Snapshot Interpolation"},
-                {(int)FrameExtrapolationMethod::SpringFilter, "Spring Filter"},
-                {(int)FrameExtrapolationMethod::AlphaBetaTracker, "Alpha-Beta Tracker"},
+                {(int)FrameExtrapolationMethod::LegacyLinear, "Classic"},
+                {(int)FrameExtrapolationMethod::CameraRelative, "Camera Sync"},
+                {(int)FrameExtrapolationMethod::SnapshotInterpolation, "Snapshot"},
+                {(int)FrameExtrapolationMethod::SpringFilter, "Spring"},
+                {(int)FrameExtrapolationMethod::AlphaBetaTracker, "Tracker"},
             };
             setDefaultValue((int)FrameExtrapolationMethod::SnapshotInterpolation);
         }
@@ -60,7 +60,7 @@ class FrameTimingDebugger : public Module
     public:
         MODULE_SETUP(FrameTimingDebugger)
         {
-            setName("Frame Timing Debugger");
+            setName("Debugger");
             setID("frame-extrapolation/frame-timing-debugger");
             setDescription("Measures real presented-frame timing, GD updates, physics delta calls, interpolation progress, and the active visual offset.");
         }
@@ -71,7 +71,7 @@ class FrameTimingShowOverlay : public Module
     public:
         MODULE_SETUP(FrameTimingShowOverlay)
         {
-            setName("Show Timing Overlay");
+            setName("Show Stats");
             setID("frame-extrapolation/show-timing-overlay");
             setDescription("Shows a small live timing readout while the frame timing debugger is enabled.");
         }
@@ -82,7 +82,7 @@ class FrameTimingLogSpikesOnly : public Module
     public:
         MODULE_SETUP(FrameTimingLogSpikesOnly)
         {
-            setName("Log Spikes Only");
+            setName("Spike Logs");
             setID("frame-extrapolation/log-spikes-only");
             setDescription("Only writes timing logs when a rendered frame exceeds the spike threshold.");
             setDefaultEnabled(true);
@@ -94,7 +94,7 @@ class FrameTimingSpikeThreshold : public FloatSliderModule
     public:
         MODULE_SETUP(FrameTimingSpikeThreshold)
         {
-            setName("Spike Threshold");
+            setName("Spike Limit");
             setID("frame-extrapolation/spike-threshold");
             setDescription("Rendered frame time in milliseconds that counts as a timing spike.");
             setRange(16.0f, 100.0f);
@@ -149,11 +149,11 @@ namespace
     {
         switch (static_cast<FrameExtrapolationMethod>(std::clamp(value, 0, 4)))
         {
-            case FrameExtrapolationMethod::LegacyLinear: return "Legacy Linear";
-            case FrameExtrapolationMethod::CameraRelative: return "Camera Relative";
-            case FrameExtrapolationMethod::SnapshotInterpolation: return "Snapshot Interpolation";
-            case FrameExtrapolationMethod::SpringFilter: return "Spring Filter";
-            case FrameExtrapolationMethod::AlphaBetaTracker: return "Alpha-Beta Tracker";
+            case FrameExtrapolationMethod::LegacyLinear: return "Classic";
+            case FrameExtrapolationMethod::CameraRelative: return "Camera Sync";
+            case FrameExtrapolationMethod::SnapshotInterpolation: return "Snapshot";
+            case FrameExtrapolationMethod::SpringFilter: return "Spring";
+            case FrameExtrapolationMethod::AlphaBetaTracker: return "Tracker";
         }
         return "Unknown";
     }
@@ -238,7 +238,7 @@ namespace
         }
 
         label->setString(fmt::format(
-            "Method: {}\nFrame: {:.2f} ms\nGD updates: {}\ngetModifiedDelta: {}\nPhysics dt: {:.3f} ms\nInterp: {:.3f}\nFX offset: {:.3f}\nPlayer d: {:.3f}\nCamera d: {:.3f}",
+            "METHOD: {}\nFRAME: {:.2f} ms\nUPDATES: {}\nPHYSICS CALLS: {}\nPHYSICS DT: {:.3f} ms\nBLEND: {:.3f}\nEFFECT: {:.3f}\nPLAYER MOVE: {:.3f}\nCAMERA MOVE: {:.3f}",
             methodName(g_frameTiming.activeMethod),
             g_frameTiming.renderDtMs,
             g_frameTiming.updatesSincePresent,
@@ -280,6 +280,11 @@ namespace
                 resetTimingSession();
             return;
         }
+
+        // Read the selector directly every presented frame. The previous
+        // debugger only updated this value after an effect successfully applied,
+        // which made the overlay lie and stay on Classic when Blend was 0.
+        g_frameTiming.activeMethod = std::clamp(FrameExtrapolationMethodOption::get()->getValue(), 0, 4);
 
         g_frameTiming.renderDtMs = g_presentDtSeconds * 1000.0f;
         ++g_frameTiming.presentIndex;

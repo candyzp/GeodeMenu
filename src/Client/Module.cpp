@@ -148,7 +148,13 @@ ModuleNode* Module::getNode()
 
 std::string Module::getName()
 {
-    return LocalisationManager::get()->getLocalisedString(fmt::format("names/{}", getID()));
+    auto key = fmt::format("names/{}", getID());
+    auto localised = LocalisationManager::get()->getLocalisedString(key);
+
+    if (localised == fmt::format("<ttf>{}", key))
+        return name.empty() ? getID() : name;
+
+    return localised;
 }
 
 std::string Module::getID()
@@ -163,7 +169,13 @@ std::string Module::getCategory()
 
 std::string Module::getDescription()
 {
-    return LocalisationManager::get()->getLocalisedString(fmt::format("descriptions/{}", getID()));
+    auto key = fmt::format("descriptions/{}", getID());
+    auto localised = LocalisationManager::get()->getLocalisedString(key);
+
+    if (localised == fmt::format("<ttf>{}", key))
+        return description;
+
+    return localised;
 }
 
 void Module::setDescription(std::string str)
