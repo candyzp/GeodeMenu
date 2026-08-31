@@ -28,3 +28,5 @@ jobs:
           name: GeodeMenu-iOS-CameraBlur
           path: output/*.geode
           if-no-files-found: error
+
+# Rebuild after Camera Blur runtime, UI label, and live debugger fixes.
