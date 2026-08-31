@@ -1,0 +1,23 @@
+name: Validate Camera Blur
+
+on:
+  push:
+    branches:
+      - frame-timing-debugger
+
+jobs:
+  ios-build:
+    name: iOS compile check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Build iOS mod
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          bindings: 'TheSillyDoggo/bindings'
+          build-config: 'Release'
+          target: iOS
