@@ -1,0 +1,432 @@
+from pathlib import Path
+
+path = Path('src/Hacks/Universal/FrameExtrapolation.cpp')
+s = path.read_text()
+
+def rep(old, new, label):
+    global s
+    if old not in s:
+        raise SystemExit(f'missing patch target: {label}')
+    s = s.replace(old, new, 1)
+
+rep(
+'#include <Geode/modify/CCScheduler.hpp>\n#include <Geode/modify/GJBaseGameLayer.hpp>',
+'#include <Geode/modify/CCScheduler.hpp>\n#include <Geode/modify/GJBaseGameLayer.hpp>\n#include <Geode/modify/PlayLayer.hpp>',
+'PlayLayer include')
+
+rep(
+'setDescription("Adds a temporal camera-motion smear after the selected smoothing method. The player is compensated so the camera/world trails while the icon stays sharp.");',
+'setDescription("Draws several faint world-only samples along camera motion. The real player is never moved by Camera Blur.");',
+'blur description')
+
+rep(
+'    constexpr int kFrameTimingOverlayTag = 0x46544D47;\n',
+'    constexpr int kFrameTimingOverlayTag = 0x46544D47;\n    constexpr int kCameraBlurOverlayTag = 0x43424C52;\n',
+'blur overlay tag')
+
+rep(
+'''    struct Snapshot
+    {
+        PlayLayer* owner = nullptr;
+        CCPoint camera = CCPointZero;
+        CCPoint player1 = CCPointZero;
+        CCPoint player2 = CCPointZero;
+        bool hasPlayer2 = false;
+        std::chrono::steady_clock::time_point time = {};
+        bool valid = false;
+    };
+''',
+'''    struct PlayerPortalState
+    {
+        int modeMask = 0;
+        bool upsideDown = false;
+        float vehicleSize = 1.0f;
+        float playerSpeed = 0.0f;
+        GameObject* lastPortal = nullptr;
+    };
+
+    int playerModeMask(PlayerObject* player)
+    {
+        if (!player)
+            return 0;
+
+        int mask = 0;
+        if (player->m_isShip) mask |= 1 << 0;
+        if (player->m_isBird) mask |= 1 << 1;
+        if (player->m_isBall) mask |= 1 << 2;
+        if (player->m_isDart) mask |= 1 << 3;
+        if (player->m_isRobot) mask |= 1 << 4;
+        if (player->m_isSpider) mask |= 1 << 5;
+        if (player->m_isSwing) mask |= 1 << 6;
+        if (player->m_isSideways) mask |= 1 << 7;
+        return mask;
+    }
+
+    PlayerPortalState readPlayerPortalState(PlayerObject* player)
+    {
+        PlayerPortalState state;
+        if (!player)
+            return state;
+
+        state.modeMask = playerModeMask(player);
+        state.upsideDown = player->m_isUpsideDown;
+        state.vehicleSize = player->m_vehicleSize;
+        state.playerSpeed = player->m_playerSpeed;
+        state.lastPortal = player->m_lastActivatedPortal;
+        return state;
+    }
+
+    bool portalStateChanged(PlayerPortalState const& a, PlayerPortalState const& b)
+    {
+        return a.modeMask != b.modeMask ||
+            a.upsideDown != b.upsideDown ||
+            std::abs(a.vehicleSize - b.vehicleSize) > 0.001f ||
+            std::abs(a.playerSpeed - b.playerSpeed) > 0.001f ||
+            a.lastPortal != b.lastPortal;
+    }
+
+    struct Snapshot
+    {
+        PlayLayer* owner = nullptr;
+        CCPoint camera = CCPointZero;
+        CCPoint player1 = CCPointZero;
+        CCPoint player2 = CCPointZero;
+        PlayerPortalState player1State;
+        PlayerPortalState player2State;
+        bool hasPlayer2 = false;
+        std::chrono::steady_clock::time_point time = {};
+        bool valid = false;
+    };
+''',
+'portal state structs')
+
+rep(
+'''        BlurState blur;
+
+        bool visualApplied = false;
+''',
+'''        BlurState blur;
+        CCPoint blurVector = CCPointZero;
+        bool lastBlurDrawn = false;
+        bool skipPresentationOnce = false;
+        bool portalReset = false;
+
+        bool visualApplied = false;
+''',
+'runtime blur/portal fields')
+
+rep(
+'''            lastMethodEffect = 0.0f;
+            lastBlurEffect = 0.0f;
+            lastPresentationApplied = false;
+''',
+'''            lastMethodEffect = 0.0f;
+            lastBlurEffect = 0.0f;
+            blurVector = CCPointZero;
+            lastBlurDrawn = false;
+            skipPresentationOnce = false;
+            portalReset = false;
+            lastPresentationApplied = false;
+''',
+'runtime clear')
+
+rep(
+'''    Snapshot readSnapshot(PlayLayer* pl)
+    {
+        Snapshot out;
+        out.owner = pl;
+        out.camera = pl->m_objectLayer->getPosition();
+        out.player1 = pl->m_player1->m_position;
+        out.hasPlayer2 = pl->m_player2 != nullptr;
+        if (out.hasPlayer2)
+            out.player2 = pl->m_player2->m_position;
+        out.time = std::chrono::steady_clock::now();
+        out.valid = true;
+        return out;
+    }
+''',
+'''    Snapshot readSnapshot(PlayLayer* pl)
+    {
+        Snapshot out;
+        out.owner = pl;
+        out.camera = pl->m_objectLayer->getPosition();
+        out.player1 = pl->m_player1->m_position;
+        out.player1State = readPlayerPortalState(pl->m_player1);
+        out.hasPlayer2 = pl->m_player2 != nullptr;
+        if (out.hasPlayer2)
+        {
+            out.player2 = pl->m_player2->m_position;
+            out.player2State = readPlayerPortalState(pl->m_player2);
+        }
+        out.time = std::chrono::steady_clock::now();
+        out.valid = true;
+        return out;
+    }
+''',
+'snapshot portal capture')
+
+rep(
+'''        if (pointDistance(a.player1, b.player1) > 256.0f)
+            return true;
+        if (a.hasPlayer2 != b.hasPlayer2)
+            return true;
+        if (a.hasPlayer2 && pointDistance(a.player2, b.player2) > 256.0f)
+            return true;
+
+        return false;
+''',
+'''        if (pointDistance(a.player1, b.player1) > 256.0f)
+            return true;
+        if (portalStateChanged(a.player1State, b.player1State))
+            return true;
+        if (a.hasPlayer2 != b.hasPlayer2)
+            return true;
+        if (a.hasPlayer2 && pointDistance(a.player2, b.player2) > 256.0f)
+            return true;
+        if (a.hasPlayer2 && portalStateChanged(a.player2State, b.player2State))
+            return true;
+
+        return false;
+''',
+'portal discontinuity')
+
+rep(
+'''    void captureAuthoritative(PlayLayer* pl)
+    {
+        Snapshot next = readSnapshot(pl);
+
+        if (g_runtime.owner != pl || !g_runtime.current.valid)
+''',
+'''    void captureAuthoritative(PlayLayer* pl)
+    {
+        Snapshot next = readSnapshot(pl);
+        g_runtime.portalReset = false;
+
+        if (g_runtime.owner != pl || !g_runtime.current.valid)
+''',
+'portal reset start')
+
+rep(
+'''        if (snapshotDiscontinuity(g_runtime.previous, g_runtime.current))
+        {
+            g_runtime.previous = g_runtime.current;
+            g_runtime.clearFilters();
+            seedFiltersFromCurrent();
+            return;
+        }
+''',
+'''        if (snapshotDiscontinuity(g_runtime.previous, g_runtime.current))
+        {
+            g_runtime.previous = g_runtime.current;
+            g_runtime.clearFilters();
+            seedFiltersFromCurrent();
+            g_runtime.skipPresentationOnce = true;
+            g_runtime.portalReset = true;
+            g_runtime.blurVector = CCPointZero;
+            return;
+        }
+''',
+'portal one-frame reset')
+
+rep(
+'        return clampMagnitude(scalePoint(rawTrail, amount), maxBlur);\n',
+'        return clampMagnitude(rawTrail, maxBlur);\n',
+'blur vector no amount scaling')
+
+rep(
+'''        g_runtime.lastPresentationApplied = false;
+        g_runtime.lastMethodEffect = 0.0f;
+        g_runtime.lastBlurEffect = 0.0f;
+
+        if (!FrameExtrapolation::get()->getRealEnabled() || !g_runtime.previous.valid || !g_runtime.current.valid)
+            return;
+''',
+'''        g_runtime.lastPresentationApplied = false;
+        g_runtime.lastMethodEffect = 0.0f;
+        g_runtime.lastBlurEffect = 0.0f;
+        g_runtime.blurVector = CCPointZero;
+        g_runtime.lastBlurDrawn = false;
+
+        if (!FrameExtrapolation::get()->getRealEnabled() || !g_runtime.previous.valid || !g_runtime.current.valid)
+            return;
+
+        if (g_runtime.skipPresentationOnce)
+        {
+            g_runtime.skipPresentationOnce = false;
+            g_runtime.blur.seed(g_runtime.current.camera);
+            return;
+        }
+''',
+'skip presentation on portal')
+
+rep(
+'''        CCPoint blurOffset = computeBlurOffset(visualCamera, schedulerDt);
+        g_runtime.lastBlurEffect = pointLength(blurOffset);
+
+        g_runtime.restoreCamera = pl->m_objectLayer->getPosition();
+''',
+'''        g_runtime.blurVector = computeBlurOffset(visualCamera, schedulerDt);
+        g_runtime.lastBlurEffect = pointLength(g_runtime.blurVector);
+
+        g_runtime.restoreCamera = pl->m_objectLayer->getPosition();
+''',
+'store blur vector')
+
+rep(
+'''        CCPoint finalCamera = addPoint(visualCamera, blurOffset);
+        CCPoint finalPlayer1 = subPoint(visualPlayer1, blurOffset);
+        CCPoint finalPlayer2 = subPoint(visualPlayer2, blurOffset);
+''',
+'''        // Camera Blur no longer changes the camera or player transforms.
+        // It is drawn later as world-only ghost samples by CameraBlurOverlay.
+        CCPoint finalCamera = visualCamera;
+        CCPoint finalPlayer1 = visualPlayer1;
+        CCPoint finalPlayer2 = visualPlayer2;
+''',
+'remove fake blur transforms')
+
+rep(
+'''            "METHOD: {}\\nPRESENT: {}\\nMETHOD FX: {:.3f}\\nBLUR FX: {:.3f}\\nFRAME: {:.2f} ms\\nPLAYER MOVE: {:.3f}\\nCAMERA MOVE: {:.3f}\\nPHYSICS CALLS: {}",
+            methodName(method),
+            g_runtime.lastPresentationApplied ? "YES" : "NO",
+            g_runtime.lastMethodEffect,
+            g_runtime.lastBlurEffect,
+            g_timing.frameMs,
+''',
+'''            "METHOD: {}\\nPRESENT: {}\\nMETHOD FX: {:.3f}\\nBLUR FX: {:.3f}\\nBLUR DRAW: {}\\nPORTAL RESET: {}\\nFRAME: {:.2f} ms\\nPLAYER MOVE: {:.3f}\\nCAMERA MOVE: {:.3f}\\nPHYSICS CALLS: {}",
+            methodName(method),
+            g_runtime.lastPresentationApplied ? "YES" : "NO",
+            g_runtime.lastMethodEffect,
+            g_runtime.lastBlurEffect,
+            g_runtime.lastBlurDrawn ? "YES" : "NO",
+            g_runtime.portalReset ? "YES" : "NO",
+            g_timing.frameMs,
+''',
+'debug blur draw and portal reset')
+
+anchor = '''        g_timing.schedulerUpdates = 0;
+        g_timing.modifiedDeltaCalls = 0;
+    }
+}
+
+// CBF also hooks CCScheduler::update.'''
+
+overlay = '''        g_timing.schedulerUpdates = 0;
+        g_timing.modifiedDeltaCalls = 0;
+    }
+
+    class CameraBlurOverlay : public CCNode
+    {
+        geode::Ref<CCRenderTexture> m_target;
+        CCSize m_targetSize = CCSizeMake(0.0f, 0.0f);
+
+        bool ensureTarget()
+        {
+            auto win = CCDirector::sharedDirector()->getWinSize();
+            if (win.width <= 1.0f || win.height <= 1.0f)
+                return false;
+
+            if (!m_target || std::abs(m_targetSize.width - win.width) > 0.5f || std::abs(m_targetSize.height - win.height) > 0.5f)
+            {
+                m_target = CCRenderTexture::create(
+                    static_cast<int>(std::ceil(win.width)),
+                    static_cast<int>(std::ceil(win.height)),
+                    kCCTexture2DPixelFormat_RGBA8888,
+                    GL_DEPTH24_STENCIL8
+                );
+                m_targetSize = win;
+
+                if (!m_target)
+                    return false;
+
+                auto sprite = m_target->getSprite();
+                sprite->setAnchorPoint({0.5f, 0.5f});
+                sprite->setBlendFunc({GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+            }
+
+            return true;
+        }
+
+    public:
+        CREATE_FUNC(CameraBlurOverlay);
+
+        void visit() override
+        {
+            g_runtime.lastBlurDrawn = false;
+
+            if (!cameraBlurEnabled() || !g_runtime.lastPresentationApplied || g_runtime.portalReset)
+                return;
+
+            float distance = pointLength(g_runtime.blurVector);
+            float amount = std::clamp(FrameExtrapolationCameraBlurAmount::get()->getValue(), 0.0f, 1.0f);
+            if (distance <= 0.05f || amount <= 0.001f)
+                return;
+
+            auto pl = typeinfo_cast<PlayLayer*>(getParent());
+            if (!validPlayLayer(pl) || !ensureTarget())
+                return;
+
+            bool p1Visible = pl->m_player1->isVisible();
+            bool p2Visible = pl->m_player2 ? pl->m_player2->isVisible() : false;
+            pl->m_player1->setVisible(false);
+            if (pl->m_player2)
+                pl->m_player2->setVisible(false);
+
+            m_target->beginWithClear(0.0f, 0.0f, 0.0f, 0.0f);
+            pl->m_objectLayer->visit();
+            if (pl->m_groundLayer)
+                pl->m_groundLayer->visit();
+            if (pl->m_groundLayer2)
+                pl->m_groundLayer2->visit();
+            m_target->end();
+
+            pl->m_player1->setVisible(p1Visible);
+            if (pl->m_player2)
+                pl->m_player2->setVisible(p2Visible);
+
+            auto sprite = m_target->getSprite();
+            auto win = CCDirector::sharedDirector()->getWinSize();
+            constexpr float sampleT[4] = {0.25f, 0.50f, 0.75f, 1.00f};
+            constexpr float sampleWeight[4] = {0.24f, 0.18f, 0.12f, 0.07f};
+
+            for (int i = 3; i >= 0; --i)
+            {
+                CCPoint offset = scalePoint(g_runtime.blurVector, sampleT[i]);
+                sprite->setPosition({win.width * 0.5f + offset.x, win.height * 0.5f + offset.y});
+                float opacity = std::clamp(amount * sampleWeight[i], 0.0f, 1.0f);
+                sprite->setOpacity(static_cast<GLubyte>(std::round(opacity * 255.0f)));
+                sprite->visit();
+            }
+
+            sprite->setOpacity(255);
+            sprite->setPosition({win.width * 0.5f, win.height * 0.5f});
+            g_runtime.lastBlurDrawn = true;
+        }
+    };
+}
+
+class $modify(FrameBlurPlayLayer, PlayLayer)
+{
+    bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects)
+    {
+        if (!PlayLayer::init(level, useReplay, dontCreateObjects))
+            return false;
+
+        if (!getChildByTag(kCameraBlurOverlayTag))
+        {
+            if (auto overlay = CameraBlurOverlay::create())
+            {
+                overlay->setTag(kCameraBlurOverlayTag);
+                addChild(overlay, 999999);
+            }
+        }
+
+        return true;
+    }
+};
+
+// CBF also hooks CCScheduler::update.'''
+
+rep(anchor, overlay, 'camera blur renderer')
+
+path.write_text(s)
