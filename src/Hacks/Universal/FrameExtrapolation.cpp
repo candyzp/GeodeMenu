@@ -20,7 +20,7 @@ class FrameExtrapolation : public Module
             setName("Frame Extrapolation");
             setID("frame-extrapolation");
             setCategory("Universal");
-            setDescription("Smooths between frames using the selected extrapolation method.");
+            setDescription("Smooths visual motion between Geometry Dash updates using the selected method.");
             setDisabled(false);
         }
 };
@@ -28,10 +28,10 @@ class FrameExtrapolation : public Module
 enum class FrameExtrapolationMethod
 {
     LegacyLinear = 0,
-    Smoothstep = 1,
-    AdamsBashforth2 = 2,
-    AdamsBashforth3 = 3,
-    AdaptiveHybrid = 4,
+    CameraRelative = 1,
+    SnapshotInterpolation = 2,
+    SpringFilter = 3,
+    AlphaBetaTracker = 4,
 };
 
 class FrameExtrapolationMethodOption : public EnumModule
@@ -40,16 +40,18 @@ class FrameExtrapolationMethodOption : public EnumModule
         MODULE_SETUP(FrameExtrapolationMethodOption)
         {
             setName("Extrapolation Method");
-            setID("frame-extrapolation/method");
-            setDescription("Selects the prediction method used automatically whenever Frame Extrapolation is enabled.");
+            // V2 intentionally uses a new saved-value key so the old AB/Hybrid
+            // selection cannot silently map to a completely different method.
+            setID("frame-extrapolation/method-v2");
+            setDescription("Selects one of five fundamentally different visual smoothing strategies used whenever Frame Extrapolation is enabled.");
             listedValues = {
                 {(int)FrameExtrapolationMethod::LegacyLinear, "Legacy Linear"},
-                {(int)FrameExtrapolationMethod::Smoothstep, "Smoothstep"},
-                {(int)FrameExtrapolationMethod::AdamsBashforth2, "Adams-Bashforth 2"},
-                {(int)FrameExtrapolationMethod::AdamsBashforth3, "Adams-Bashforth 3"},
-                {(int)FrameExtrapolationMethod::AdaptiveHybrid, "Adaptive Hybrid"},
+                {(int)FrameExtrapolationMethod::CameraRelative, "Camera Relative"},
+                {(int)FrameExtrapolationMethod::SnapshotInterpolation, "Snapshot Interpolation"},
+                {(int)FrameExtrapolationMethod::SpringFilter, "Spring Filter"},
+                {(int)FrameExtrapolationMethod::AlphaBetaTracker, "Alpha-Beta Tracker"},
             };
-            setDefaultValue((int)FrameExtrapolationMethod::AdaptiveHybrid);
+            setDefaultValue((int)FrameExtrapolationMethod::SnapshotInterpolation);
         }
 };
 
@@ -60,7 +62,7 @@ class FrameTimingDebugger : public Module
         {
             setName("Frame Timing Debugger");
             setID("frame-extrapolation/frame-timing-debugger");
-            setDescription("Measures real presented-frame timing, GD updates, physics delta calls, and interpolation progress without changing gameplay.");
+            setDescription("Measures real presented-frame timing, GD updates, physics delta calls, interpolation progress, and the active visual offset.");
         }
 };
 
@@ -112,11 +114,13 @@ namespace
 {
     constexpr int kFrameTimingOverlayTag = 0x46544D47;
 
+    std::chrono::steady_clock::time_point g_lastPresentation = {};
+    bool g_hasPresentationTime = false;
+    float g_presentDtSeconds = 1.0f / 60.0f;
+    unsigned long long g_presentSerial = 0;
+
     struct FrameTimingStats
     {
-        std::chrono::steady_clock::time_point lastPresent = {};
-        bool hasPresentTime = false;
-
         float renderDtMs = 0.0f;
         unsigned long long presentIndex = 0;
         unsigned int updatesSincePresent = 0;
@@ -124,6 +128,8 @@ namespace
 
         float lastModifiedDeltaMs = 0.0f;
         float lastInterpPercent = 0.0f;
+        float lastFxOffset = 0.0f;
+        int activeMethod = 0;
 
         CCPoint sampledPlayerPos = CCPointZero;
         CCPoint sampledCameraPos = CCPointZero;
@@ -139,6 +145,19 @@ namespace
 
     FrameTimingStats g_frameTiming;
 
+    char const* methodName(int value)
+    {
+        switch (static_cast<FrameExtrapolationMethod>(std::clamp(value, 0, 4)))
+        {
+            case FrameExtrapolationMethod::LegacyLinear: return "Legacy Linear";
+            case FrameExtrapolationMethod::CameraRelative: return "Camera Relative";
+            case FrameExtrapolationMethod::SnapshotInterpolation: return "Snapshot Interpolation";
+            case FrameExtrapolationMethod::SpringFilter: return "Spring Filter";
+            case FrameExtrapolationMethod::AlphaBetaTracker: return "Alpha-Beta Tracker";
+        }
+        return "Unknown";
+    }
+
     bool frameTimingDebuggerEnabled()
     {
         return FrameTimingDebugger::get()->getRealEnabled();
@@ -151,9 +170,33 @@ namespace
 
     float pointDistance(CCPoint const& a, CCPoint const& b)
     {
-        auto dx = a.x - b.x;
-        auto dy = a.y - b.y;
+        float dx = a.x - b.x;
+        float dy = a.y - b.y;
         return std::sqrt(dx * dx + dy * dy);
+    }
+
+    CCPoint addPoint(CCPoint const& a, CCPoint const& b)
+    {
+        return CCPoint{a.x + b.x, a.y + b.y};
+    }
+
+    CCPoint subPoint(CCPoint const& a, CCPoint const& b)
+    {
+        return CCPoint{a.x - b.x, a.y - b.y};
+    }
+
+    CCPoint scalePoint(CCPoint const& p, float amount)
+    {
+        return CCPoint{p.x * amount, p.y * amount};
+    }
+
+    CCPoint lerpPoint(CCPoint const& a, CCPoint const& b, float t)
+    {
+        t = std::clamp(t, 0.0f, 1.0f);
+        return CCPoint{
+            a.x + (b.x - a.x) * t,
+            a.y + (b.y - a.y) * t
+        };
     }
 
     void removeTimingOverlay()
@@ -195,12 +238,14 @@ namespace
         }
 
         label->setString(fmt::format(
-            "Frame: {:.2f} ms\nGD updates: {}\ngetModifiedDelta: {}\nPhysics dt: {:.3f} ms\nInterp: {:.3f}\nPlayer d: {:.3f}\nCamera d: {:.3f}",
+            "Method: {}\nFrame: {:.2f} ms\nGD updates: {}\ngetModifiedDelta: {}\nPhysics dt: {:.3f} ms\nInterp: {:.3f}\nFX offset: {:.3f}\nPlayer d: {:.3f}\nCamera d: {:.3f}",
+            methodName(g_frameTiming.activeMethod),
             g_frameTiming.renderDtMs,
             g_frameTiming.updatesSincePresent,
             g_frameTiming.modifiedDeltaCallsSincePresent,
             g_frameTiming.lastModifiedDeltaMs,
             g_frameTiming.lastInterpPercent,
+            g_frameTiming.lastFxOffset,
             g_frameTiming.playerDelta,
             g_frameTiming.cameraDelta
         ).c_str());
@@ -214,24 +259,29 @@ namespace
 
     void onPresentedFrame()
     {
+        auto now = std::chrono::steady_clock::now();
+        if (g_hasPresentationTime)
+        {
+            float measured = std::chrono::duration<float>(now - g_lastPresentation).count();
+            if (std::isfinite(measured) && measured > 0.0f)
+                g_presentDtSeconds = std::clamp(measured, 1.0f / 1000.0f, 0.10f);
+        }
+        else
+        {
+            g_hasPresentationTime = true;
+        }
+
+        g_lastPresentation = now;
+        ++g_presentSerial;
+
         if (!frameTimingDebuggerEnabled())
         {
-            if (g_frameTiming.hasPresentTime || g_frameTiming.presentIndex != 0)
+            if (g_frameTiming.presentIndex != 0)
                 resetTimingSession();
             return;
         }
 
-        auto now = std::chrono::steady_clock::now();
-
-        if (g_frameTiming.hasPresentTime)
-            g_frameTiming.renderDtMs = std::chrono::duration<float, std::milli>(now - g_frameTiming.lastPresent).count();
-        else
-        {
-            g_frameTiming.renderDtMs = 0.0f;
-            g_frameTiming.hasPresentTime = true;
-        }
-
-        g_frameTiming.lastPresent = now;
+        g_frameTiming.renderDtMs = g_presentDtSeconds * 1000.0f;
         ++g_frameTiming.presentIndex;
 
         if (g_frameTiming.hasSample)
@@ -255,16 +305,18 @@ namespace
         bool isSpike = g_frameTiming.renderDtMs >= frameTimingSpikeThreshold();
         bool logSpikesOnly = FrameTimingLogSpikesOnly::get()->getRealEnabled();
 
-        if (g_frameTiming.renderDtMs > 0.0f && (!logSpikesOnly || isSpike))
+        if (!logSpikesOnly || isSpike)
         {
             log::info(
-                "[FrameTiming] frame={} render={:.2f}ms updates={} modifiedDeltaCalls={} physicsDelta={:.3f}ms interp={:.3f} playerDelta={:.3f} cameraDelta={:.3f}{}",
+                "[FrameTiming] method={} frame={} render={:.2f}ms updates={} modifiedDeltaCalls={} physicsDelta={:.3f}ms interp={:.3f} fxOffset={:.3f} playerDelta={:.3f} cameraDelta={:.3f}{}",
+                methodName(g_frameTiming.activeMethod),
                 g_frameTiming.presentIndex,
                 g_frameTiming.renderDtMs,
                 g_frameTiming.updatesSincePresent,
                 g_frameTiming.modifiedDeltaCallsSincePresent,
                 g_frameTiming.lastModifiedDeltaMs,
                 g_frameTiming.lastInterpPercent,
+                g_frameTiming.lastFxOffset,
                 g_frameTiming.playerDelta,
                 g_frameTiming.cameraDelta,
                 isSpike ? " SPIKE" : ""
@@ -280,27 +332,6 @@ namespace
 
         g_frameTiming.updatesSincePresent = 0;
         g_frameTiming.modifiedDeltaCallsSincePresent = 0;
-    }
-
-    float smoothstep01(float t)
-    {
-        t = std::clamp(t, 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
-    }
-
-    float pointLength(CCPoint const& p)
-    {
-        return std::sqrt(p.x * p.x + p.y * p.y);
-    }
-
-    CCPoint clampVectorMagnitude(CCPoint value, float maxLength)
-    {
-        float length = pointLength(value);
-        if (length <= maxLength || length <= 0.00001f)
-            return value;
-
-        float scale = maxLength / length;
-        return {value.x * scale, value.y * scale};
     }
 }
 
@@ -328,12 +359,11 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
 {
     struct MotionHistory
     {
+        CCPoint previousPos = CCPointZero;
         CCPoint lastPos = CCPointZero;
-        CCPoint velocity0 = CCPointZero;
-        CCPoint velocity1 = CCPointZero;
-        CCPoint velocity2 = CCPointZero;
-        int velocitySamples = 0;
+        CCPoint velocity = CCPointZero;
         bool seeded = false;
+        bool hasPrevious = false;
 
         void reset()
         {
@@ -344,29 +374,129 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         {
             if (!seeded)
             {
+                previousPos = pos;
                 lastPos = pos;
+                velocity = CCPointZero;
+                seeded = true;
+                hasPrevious = false;
+                return;
+            }
+
+            // Treat very large one-tick jumps as a discontinuity instead of
+            // feeding a portal/camera snap into a visual predictor.
+            if (pointDistance(pos, lastPos) > 512.0f)
+            {
+                previousPos = pos;
+                lastPos = pos;
+                velocity = CCPointZero;
+                hasPrevious = false;
+                return;
+            }
+
+            previousPos = lastPos;
+            velocity = subPoint(pos, lastPos);
+            lastPos = pos;
+            hasPrevious = true;
+        }
+    };
+
+    struct SpringState
+    {
+        CCPoint position = CCPointZero;
+        CCPoint velocity = CCPointZero;
+        bool seeded = false;
+
+        void reset()
+        {
+            *this = {};
+        }
+
+        void seed(CCPoint const& target)
+        {
+            position = target;
+            velocity = CCPointZero;
+            seeded = true;
+        }
+
+        void step(CCPoint const& target, float dt)
+        {
+            if (!seeded || pointDistance(position, target) > 256.0f)
+            {
+                seed(target);
+                return;
+            }
+
+            dt = std::clamp(dt, 1.0f / 1000.0f, 1.0f / 30.0f);
+            constexpr float stiffness = 150.0f;
+            constexpr float damping = 24.5f;
+
+            CCPoint displacement = subPoint(target, position);
+            CCPoint acceleration = subPoint(scalePoint(displacement, stiffness), scalePoint(velocity, damping));
+            velocity = addPoint(velocity, scalePoint(acceleration, dt));
+            position = addPoint(position, scalePoint(velocity, dt));
+        }
+    };
+
+    struct AlphaBetaState
+    {
+        CCPoint position = CCPointZero;
+        CCPoint velocity = CCPointZero;
+        bool seeded = false;
+
+        void reset()
+        {
+            *this = {};
+        }
+
+        void observe(CCPoint const& measurement)
+        {
+            if (!seeded)
+            {
+                position = measurement;
+                velocity = CCPointZero;
                 seeded = true;
                 return;
             }
 
-            velocity2 = velocity1;
-            velocity1 = velocity0;
-            velocity0 = pos - lastPos;
-            lastPos = pos;
-            velocitySamples = std::min(velocitySamples + 1, 3);
+            CCPoint predicted = addPoint(position, velocity);
+            CCPoint residual = subPoint(measurement, predicted);
+
+            if (pointDistance(predicted, measurement) > 256.0f)
+            {
+                position = measurement;
+                velocity = CCPointZero;
+                return;
+            }
+
+            constexpr float alpha = 0.72f;
+            constexpr float beta = 0.18f;
+            position = addPoint(predicted, scalePoint(residual, alpha));
+            velocity = addPoint(velocity, scalePoint(residual, beta));
         }
     };
 
     struct Fields
     {
-        float timeTilNextTick = 0;
-        float progressTilNextTick = 0;
-        float modifiedDeltaReturn = 0;
+        float timeTilNextTick = 0.0f;
+        float progressTilNextTick = 0.0f;
+        float modifiedDeltaReturn = 0.0f;
 
         MotionHistory cameraHistory;
         MotionHistory player1History;
         MotionHistory player2History;
+        MotionHistory player1ScreenHistory;
+        MotionHistory player2ScreenHistory;
 
+        SpringState cameraSpring;
+        SpringState player1Spring;
+        SpringState player2Spring;
+
+        AlphaBetaState cameraTracker;
+        AlphaBetaState player1Tracker;
+        AlphaBetaState player2Tracker;
+
+        unsigned long long lastSpringPresentSerial = 0;
+        bool visualApplied = false;
         bool wasEnabled = false;
         int lastMethod = -1;
     };
@@ -381,110 +511,104 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
     void resetExtrapolationState()
     {
         auto self = m_fields.self();
-        self->timeTilNextTick = 0;
-        self->progressTilNextTick = 0;
-        self->modifiedDeltaReturn = 0;
+        self->timeTilNextTick = 0.0f;
+        self->progressTilNextTick = 0.0f;
+        self->modifiedDeltaReturn = 0.0f;
         self->cameraHistory.reset();
         self->player1History.reset();
         self->player2History.reset();
+        self->player1ScreenHistory.reset();
+        self->player2ScreenHistory.reset();
+        self->cameraSpring.reset();
+        self->player1Spring.reset();
+        self->player2Spring.reset();
+        self->cameraTracker.reset();
+        self->player1Tracker.reset();
+        self->player2Tracker.reset();
+        self->lastSpringPresentSerial = g_presentSerial;
+        self->visualApplied = false;
+        g_frameTiming.lastFxOffset = 0.0f;
     }
 
-    CCPoint getPredictedStep(MotionHistory const& history, FrameExtrapolationMethod method)
+    void setGroundOffset(GJGroundLayer* ground, float moveBy)
     {
-        if (history.velocitySamples <= 0)
-            return CCPointZero;
+        if (!ground)
+            return;
 
-        CCPoint v0 = history.velocity0;
-        CCPoint v1 = history.velocity1;
-        CCPoint v2 = history.velocity2;
+        auto children = ground->getChildren();
+        if (!children)
+            return;
 
-        switch (method)
+        for (auto child : CCArrayExt<CCNode*>(children))
         {
-            case FrameExtrapolationMethod::LegacyLinear:
-            case FrameExtrapolationMethod::Smoothstep:
-                return v0;
-
-            case FrameExtrapolationMethod::AdamsBashforth2:
-                if (history.velocitySamples < 2)
-                    return v0;
-                return {
-                    1.5f * v0.x - 0.5f * v1.x,
-                    1.5f * v0.y - 0.5f * v1.y
-                };
-
-            case FrameExtrapolationMethod::AdamsBashforth3:
-                if (history.velocitySamples < 3)
-                {
-                    if (history.velocitySamples >= 2)
-                        return {1.5f * v0.x - 0.5f * v1.x, 1.5f * v0.y - 0.5f * v1.y};
-                    return v0;
-                }
-                return {
-                    (23.0f * v0.x - 16.0f * v1.x + 5.0f * v2.x) / 12.0f,
-                    (23.0f * v0.y - 16.0f * v1.y + 5.0f * v2.y) / 12.0f
-                };
-
-            case FrameExtrapolationMethod::AdaptiveHybrid:
-            {
-                if (history.velocitySamples < 2)
-                    return v0;
-
-                CCPoint acceleration = v0 - v1;
-                float speed = pointLength(v0);
-                float accel = pointLength(acceleration);
-                float ratio = accel / std::max(speed, 0.001f);
-
-                CCPoint predicted = v0;
-
-                if (history.velocitySamples >= 3 && ratio < 0.30f)
-                {
-                    predicted = CCPoint{
-                        (23.0f * v0.x - 16.0f * v1.x + 5.0f * v2.x) / 12.0f,
-                        (23.0f * v0.y - 16.0f * v1.y + 5.0f * v2.y) / 12.0f
-                    };
-                }
-                else if (ratio < 0.75f)
-                {
-                    predicted = CCPoint{
-                        1.5f * v0.x - 0.5f * v1.x,
-                        1.5f * v0.y - 0.5f * v1.y
-                    };
-                }
-
-                float maxPrediction = std::max(speed * 1.35f, 0.25f);
-                return clampVectorMagnitude(predicted, maxPrediction);
-            }
+            if (typeinfo_cast<CCSpriteBatchNode*>(child))
+                child->setPositionX(moveBy);
         }
-
-        return v0;
     }
 
-    CCPoint getVisualOffset(MotionHistory const& history, FrameExtrapolationMethod method, float percent)
+    void restoreVisualState()
     {
-        float phase = method == FrameExtrapolationMethod::Smoothstep ? smoothstep01(percent) : percent;
-        CCPoint step = getPredictedStep(history, method);
-        return {step.x * phase, step.y * phase};
-    }
+        auto self = m_fields.self();
+        if (!self->visualApplied)
+            return;
 
-    float getRotationPhase(FrameExtrapolationMethod method, float percent)
-    {
-        return method == FrameExtrapolationMethod::Smoothstep ? smoothstep01(percent) : percent;
+        if (m_objectLayer && self->cameraHistory.seeded)
+            m_objectLayer->setPosition(self->cameraHistory.lastPos);
+
+        if (m_player1 && self->player1History.seeded)
+            m_player1->CCNode::setPosition(self->player1History.lastPos);
+
+        if (m_player2 && self->player2History.seeded)
+            m_player2->CCNode::setPosition(self->player2History.lastPos);
+
+        setGroundOffset(m_groundLayer, 0.0f);
+        setGroundOffset(m_groundLayer2, 0.0f);
+        self->visualApplied = false;
     }
 
     void sampleAuthoritativeMotion()
     {
         auto self = m_fields.self();
 
+        CCPoint cameraPos = m_objectLayer ? m_objectLayer->getPosition() : CCPointZero;
         if (m_objectLayer)
-            self->cameraHistory.push(m_objectLayer->getPosition());
+        {
+            self->cameraHistory.push(cameraPos);
+            self->cameraTracker.observe(cameraPos);
+            if (!self->cameraSpring.seeded)
+                self->cameraSpring.seed(cameraPos);
+        }
 
         if (m_player1)
-            self->player1History.push(m_player1->m_position);
+        {
+            CCPoint playerPos = m_player1->m_position;
+            self->player1History.push(playerPos);
+            // In object-layer coordinates, screen motion is local player motion
+            // plus the object-layer translation. This lets Camera Relative
+            // predict the small residual seen on screen instead of two large
+            // independent world motions.
+            self->player1ScreenHistory.push(addPoint(playerPos, cameraPos));
+            self->player1Tracker.observe(playerPos);
+            if (!self->player1Spring.seeded)
+                self->player1Spring.seed(playerPos);
+        }
 
         if (m_player2)
-            self->player2History.push(m_player2->m_position);
+        {
+            CCPoint playerPos = m_player2->m_position;
+            self->player2History.push(playerPos);
+            self->player2ScreenHistory.push(addPoint(playerPos, cameraPos));
+            self->player2Tracker.observe(playerPos);
+            if (!self->player2Spring.seeded)
+                self->player2Spring.seed(playerPos);
+        }
         else
+        {
             self->player2History.reset();
+            self->player2ScreenHistory.reset();
+            self->player2Spring.reset();
+            self->player2Tracker.reset();
+        }
     }
 
     float getModifiedDelta(float dt)
@@ -500,19 +624,181 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         if (FrameExtrapolation::get()->getRealEnabled())
             m_fields->modifiedDeltaReturn = pRet;
         else
-            m_fields->modifiedDeltaReturn = 0;
+            m_fields->modifiedDeltaReturn = 0.0f;
 
         return pRet;
+    }
+
+    void applyLegacyLinear(float percent)
+    {
+        auto self = m_fields.self();
+        CCPoint cameraOffset = scalePoint(self->cameraHistory.velocity, percent);
+
+        if (m_objectLayer && self->cameraHistory.seeded)
+            m_objectLayer->setPosition(addPoint(self->cameraHistory.lastPos, cameraOffset));
+
+        setGroundOffset(m_groundLayer, cameraOffset.x);
+        setGroundOffset(m_groundLayer2, cameraOffset.x);
+
+        if (m_player1 && self->player1History.seeded)
+            m_player1->CCNode::setPosition(addPoint(self->player1History.lastPos, scalePoint(self->player1History.velocity, percent)));
+
+        if (m_player2 && self->player2History.seeded)
+            m_player2->CCNode::setPosition(addPoint(self->player2History.lastPos, scalePoint(self->player2History.velocity, percent)));
+    }
+
+    void applyCameraRelative(float percent)
+    {
+        auto self = m_fields.self();
+        CCPoint cameraOffset = scalePoint(self->cameraHistory.velocity, percent);
+
+        if (m_objectLayer && self->cameraHistory.seeded)
+            m_objectLayer->setPosition(addPoint(self->cameraHistory.lastPos, cameraOffset));
+
+        setGroundOffset(m_groundLayer, cameraOffset.x);
+        setGroundOffset(m_groundLayer2, cameraOffset.x);
+
+        if (m_player1 && self->player1History.seeded)
+        {
+            CCPoint desiredScreenMotion = scalePoint(self->player1ScreenHistory.velocity, percent);
+            CCPoint localResidual = subPoint(desiredScreenMotion, cameraOffset);
+            m_player1->CCNode::setPosition(addPoint(self->player1History.lastPos, localResidual));
+        }
+
+        if (m_player2 && self->player2History.seeded)
+        {
+            CCPoint desiredScreenMotion = scalePoint(self->player2ScreenHistory.velocity, percent);
+            CCPoint localResidual = subPoint(desiredScreenMotion, cameraOffset);
+            m_player2->CCNode::setPosition(addPoint(self->player2History.lastPos, localResidual));
+        }
+    }
+
+    void applySnapshotInterpolation(float percent)
+    {
+        auto self = m_fields.self();
+        CCPoint visualCamera = self->cameraHistory.lastPos;
+
+        if (self->cameraHistory.hasPrevious)
+            visualCamera = lerpPoint(self->cameraHistory.previousPos, self->cameraHistory.lastPos, percent);
+
+        CCPoint cameraOffset = subPoint(visualCamera, self->cameraHistory.lastPos);
+
+        if (m_objectLayer && self->cameraHistory.seeded)
+            m_objectLayer->setPosition(visualCamera);
+
+        setGroundOffset(m_groundLayer, cameraOffset.x);
+        setGroundOffset(m_groundLayer2, cameraOffset.x);
+
+        if (m_player1 && self->player1History.seeded)
+        {
+            CCPoint visual = self->player1History.hasPrevious
+                ? lerpPoint(self->player1History.previousPos, self->player1History.lastPos, percent)
+                : self->player1History.lastPos;
+            m_player1->CCNode::setPosition(visual);
+        }
+
+        if (m_player2 && self->player2History.seeded)
+        {
+            CCPoint visual = self->player2History.hasPrevious
+                ? lerpPoint(self->player2History.previousPos, self->player2History.lastPos, percent)
+                : self->player2History.lastPos;
+            m_player2->CCNode::setPosition(visual);
+        }
+    }
+
+    void applySpringFilter()
+    {
+        auto self = m_fields.self();
+
+        if (self->lastSpringPresentSerial != g_presentSerial)
+        {
+            if (self->cameraHistory.seeded)
+                self->cameraSpring.step(self->cameraHistory.lastPos, g_presentDtSeconds);
+            if (self->player1History.seeded)
+                self->player1Spring.step(self->player1History.lastPos, g_presentDtSeconds);
+            if (self->player2History.seeded)
+                self->player2Spring.step(self->player2History.lastPos, g_presentDtSeconds);
+
+            self->lastSpringPresentSerial = g_presentSerial;
+        }
+
+        CCPoint cameraOffset = CCPointZero;
+        if (m_objectLayer && self->cameraSpring.seeded && self->cameraHistory.seeded)
+        {
+            cameraOffset = subPoint(self->cameraSpring.position, self->cameraHistory.lastPos);
+            m_objectLayer->setPosition(self->cameraSpring.position);
+        }
+
+        setGroundOffset(m_groundLayer, cameraOffset.x);
+        setGroundOffset(m_groundLayer2, cameraOffset.x);
+
+        if (m_player1 && self->player1Spring.seeded)
+            m_player1->CCNode::setPosition(self->player1Spring.position);
+
+        if (m_player2 && self->player2Spring.seeded)
+            m_player2->CCNode::setPosition(self->player2Spring.position);
+    }
+
+    void applyAlphaBetaTracker(float percent)
+    {
+        auto self = m_fields.self();
+        CCPoint visualCamera = self->cameraTracker.seeded
+            ? addPoint(self->cameraTracker.position, scalePoint(self->cameraTracker.velocity, percent))
+            : self->cameraHistory.lastPos;
+        CCPoint cameraOffset = subPoint(visualCamera, self->cameraHistory.lastPos);
+
+        if (m_objectLayer && self->cameraHistory.seeded)
+            m_objectLayer->setPosition(visualCamera);
+
+        setGroundOffset(m_groundLayer, cameraOffset.x);
+        setGroundOffset(m_groundLayer2, cameraOffset.x);
+
+        if (m_player1 && self->player1History.seeded)
+        {
+            CCPoint visual = self->player1Tracker.seeded
+                ? addPoint(self->player1Tracker.position, scalePoint(self->player1Tracker.velocity, percent))
+                : self->player1History.lastPos;
+            m_player1->CCNode::setPosition(visual);
+        }
+
+        if (m_player2 && self->player2History.seeded)
+        {
+            CCPoint visual = self->player2Tracker.seeded
+                ? addPoint(self->player2Tracker.position, scalePoint(self->player2Tracker.velocity, percent))
+                : self->player2History.lastPos;
+            m_player2->CCNode::setPosition(visual);
+        }
+    }
+
+    void updateDebugEffectMagnitude(FrameExtrapolationMethod method)
+    {
+        auto self = m_fields.self();
+        float magnitude = 0.0f;
+
+        if (m_objectLayer && self->cameraHistory.seeded)
+            magnitude = std::max(magnitude, pointDistance(m_objectLayer->getPosition(), self->cameraHistory.lastPos));
+        if (m_player1 && self->player1History.seeded)
+            magnitude = std::max(magnitude, pointDistance(m_player1->getPosition(), self->player1History.lastPos));
+        if (m_player2 && self->player2History.seeded)
+            magnitude = std::max(magnitude, pointDistance(m_player2->getPosition(), self->player2History.lastPos));
+
+        g_frameTiming.activeMethod = static_cast<int>(method);
+        g_frameTiming.lastFxOffset = magnitude;
     }
 
     virtual void update(float dt)
     {
         auto self = m_fields.self();
 
+        // Undo the previous visual-only transform before Geometry Dash advances
+        // authoritative gameplay. This prevents our presentation state from
+        // leaking back into the next physics sample.
+        restoreVisualState();
+
         if (frameTimingDebuggerEnabled())
             ++g_frameTiming.updatesSincePresent;
 
-        self->modifiedDeltaReturn = 0;
+        self->modifiedDeltaReturn = 0.0f;
         GJBaseGameLayer::update(dt);
 
         auto playLayer = typeinfo_cast<PlayLayer*>(this);
@@ -536,6 +822,7 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
             self->wasEnabled = false;
             self->lastMethod = -1;
             g_frameTiming.lastInterpPercent = 0.0f;
+            g_frameTiming.lastFxOffset = 0.0f;
             return;
         }
 
@@ -555,102 +842,60 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
             return;
         }
 
-        if (!isRunning() || dt <= 0 || !std::isfinite(dt) || playLayer->m_levelEndAnimationStarted)
+        if (!isRunning() || dt <= 0.0f || !std::isfinite(dt) || playLayer->m_levelEndAnimationStarted)
         {
             resetExtrapolationState();
             return;
         }
 
-        if (self->modifiedDeltaReturn != 0)
+        if (self->modifiedDeltaReturn != 0.0f)
         {
-            if (!std::isfinite(self->modifiedDeltaReturn) || self->modifiedDeltaReturn <= 0 || self->modifiedDeltaReturn > 0.05f)
+            if (!std::isfinite(self->modifiedDeltaReturn) || self->modifiedDeltaReturn <= 0.0f || self->modifiedDeltaReturn > 0.05f)
             {
                 resetExtrapolationState();
                 return;
             }
 
             self->timeTilNextTick = self->modifiedDeltaReturn;
-            self->progressTilNextTick = 0;
+            self->progressTilNextTick = 0.0f;
             sampleAuthoritativeMotion();
         }
         else
         {
             self->progressTilNextTick += dt;
-            if (self->timeTilNextTick > 0)
+            if (self->timeTilNextTick > 0.0f)
                 self->progressTilNextTick = std::min(self->progressTilNextTick, self->timeTilNextTick);
         }
 
-        if (self->timeTilNextTick <= 0 || !std::isfinite(self->timeTilNextTick))
+        if (self->timeTilNextTick <= 0.0f || !std::isfinite(self->timeTilNextTick) || !self->cameraHistory.seeded)
             return;
 
         float percent = std::clamp(self->progressTilNextTick / self->timeTilNextTick, 0.0f, 1.0f);
-        g_frameTiming.lastInterpPercent = percent;
-
         if (!std::isfinite(percent))
             return;
 
-        CCPoint cameraOffset = getVisualOffset(self->cameraHistory, method, percent);
+        g_frameTiming.lastInterpPercent = percent;
 
-        if (m_objectLayer && self->cameraHistory.seeded)
+        switch (method)
         {
-            auto base = self->cameraHistory.lastPos;
-            m_objectLayer->setPosition(base + cameraOffset);
+            case FrameExtrapolationMethod::LegacyLinear:
+                applyLegacyLinear(percent);
+                break;
+            case FrameExtrapolationMethod::CameraRelative:
+                applyCameraRelative(percent);
+                break;
+            case FrameExtrapolationMethod::SnapshotInterpolation:
+                applySnapshotInterpolation(percent);
+                break;
+            case FrameExtrapolationMethod::SpringFilter:
+                applySpringFilter();
+                break;
+            case FrameExtrapolationMethod::AlphaBetaTracker:
+                applyAlphaBetaTracker(percent);
+                break;
         }
 
-        extrapolateGround(m_groundLayer, cameraOffset.x);
-        extrapolateGround(m_groundLayer2, cameraOffset.x);
-
-        extrapolatePlayer(m_player1, self->player1History, method, percent);
-
-        if (m_player2)
-            extrapolatePlayer(m_player2, self->player2History, method, percent);
-    }
-
-    float playerGetRotatedHitbox(PlayerObject* player)
-    {
-        if (player && player->m_isSideways)
-            return -90.0f;
-        return 0.0f;
-    }
-
-    void extrapolatePlayer(PlayerObject* player, MotionHistory const& history, FrameExtrapolationMethod method, float percent)
-    {
-        if (!player || !history.seeded)
-            return;
-
-        CCPoint offset = getVisualOffset(history, method, percent);
-        player->CCNode::setPosition(history.lastPos + offset);
-
-        float rotateSpeed = (player->m_isBall && player->m_isBallRotating) ? 1.0f : player->m_rotateSpeed;
-        float tickRate = selfTickRate();
-        float endRot = tickRate > 0.0f ? (player->m_rotationSpeed * rotateSpeed) / tickRate : 0.0f;
-        float phase = getRotationPhase(method, percent);
-
-        if (player->m_mainLayer)
-            player->m_mainLayer->setRotation(endRot * phase + playerGetRotatedHitbox(player));
-    }
-
-    float selfTickRate()
-    {
-        auto self = m_fields.self();
-        if (self->timeTilNextTick <= 0.0f)
-            return 240.0f;
-        return 1.0f / self->timeTilNextTick;
-    }
-
-    void extrapolateGround(GJGroundLayer* ground, float moveBy)
-    {
-        if (!ground)
-            return;
-
-        auto children = ground->getChildren();
-        if (!children)
-            return;
-
-        for (auto child : CCArrayExt<CCNode*>(children))
-        {
-            if (typeinfo_cast<CCSpriteBatchNode*>(child))
-                child->setPositionX(moveBy);
-        }
+        self->visualApplied = true;
+        updateDebugEffectMagnitude(method);
     }
 };
