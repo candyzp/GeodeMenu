@@ -21,3 +21,10 @@ jobs:
           bindings: 'TheSillyDoggo/bindings'
           build-config: 'Release'
           target: iOS
+
+      - name: Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeodeMenu-iOS-CameraBlur
+          path: output/*.geode
+          if-no-files-found: error
