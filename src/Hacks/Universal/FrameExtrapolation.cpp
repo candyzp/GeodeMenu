@@ -438,14 +438,14 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
 
                 if (history.velocitySamples >= 3 && ratio < 0.30f)
                 {
-                    predicted = {
+                    predicted = CCPoint{
                         (23.0f * v0.x - 16.0f * v1.x + 5.0f * v2.x) / 12.0f,
                         (23.0f * v0.y - 16.0f * v1.y + 5.0f * v2.y) / 12.0f
                     };
                 }
                 else if (ratio < 0.75f)
                 {
-                    predicted = {
+                    predicted = CCPoint{
                         1.5f * v0.x - 0.5f * v1.x,
                         1.5f * v0.y - 0.5f * v1.y
                     };
