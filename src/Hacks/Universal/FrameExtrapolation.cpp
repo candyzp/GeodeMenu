@@ -1,5 +1,6 @@
 #include "../../Client/Module.hpp"
 #include "../../Client/FloatSliderModule.hpp"
+#include "../../Client/EnumModule.hpp"
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/CCDirector.hpp>
@@ -19,11 +20,36 @@ class FrameExtrapolation : public Module
             setName("Frame Extrapolation");
             setID("frame-extrapolation");
             setCategory("Universal");
-            setDescription("Smooths between frames by predicting where the player will be the next frame using its velocity.");
-
-            // The original module later hard-disabled this setting because of bugs.
-            // Keep the normal toggle available again, but do not force it on.
+            setDescription("Smooths between frames using the selected extrapolation method.");
             setDisabled(false);
+        }
+};
+
+enum class FrameExtrapolationMethod
+{
+    LegacyLinear = 0,
+    Smoothstep = 1,
+    AdamsBashforth2 = 2,
+    AdamsBashforth3 = 3,
+    AdaptiveHybrid = 4,
+};
+
+class FrameExtrapolationMethodOption : public EnumModule
+{
+    public:
+        MODULE_SETUP(FrameExtrapolationMethodOption)
+        {
+            setName("Extrapolation Method");
+            setID("frame-extrapolation/method");
+            setDescription("Selects the prediction method used automatically whenever Frame Extrapolation is enabled.");
+            listedValues = {
+                {(int)FrameExtrapolationMethod::LegacyLinear, "Legacy Linear"},
+                {(int)FrameExtrapolationMethod::Smoothstep, "Smoothstep"},
+                {(int)FrameExtrapolationMethod::AdamsBashforth2, "Adams-Bashforth 2"},
+                {(int)FrameExtrapolationMethod::AdamsBashforth3, "Adams-Bashforth 3"},
+                {(int)FrameExtrapolationMethod::AdaptiveHybrid, "Adaptive Hybrid"},
+            };
+            setDefaultValue((int)FrameExtrapolationMethod::AdaptiveHybrid);
         }
 };
 
@@ -76,6 +102,7 @@ class FrameTimingSpikeThreshold : public FloatSliderModule
 };
 
 SUBMIT_HACK(FrameExtrapolation)
+SUBMIT_OPTION(FrameExtrapolation, FrameExtrapolationMethodOption)
 SUBMIT_OPTION(FrameExtrapolation, FrameTimingDebugger)
 SUBMIT_OPTION(FrameExtrapolation, FrameTimingShowOverlay)
 SUBMIT_OPTION(FrameExtrapolation, FrameTimingLogSpikesOnly)
@@ -197,9 +224,7 @@ namespace
         auto now = std::chrono::steady_clock::now();
 
         if (g_frameTiming.hasPresentTime)
-        {
             g_frameTiming.renderDtMs = std::chrono::duration<float, std::milli>(now - g_frameTiming.lastPresent).count();
-        }
         else
         {
             g_frameTiming.renderDtMs = 0.0f;
@@ -213,14 +238,8 @@ namespace
         {
             if (g_frameTiming.hasPreviousPresentedSample)
             {
-                g_frameTiming.playerDelta = pointDistance(
-                    g_frameTiming.sampledPlayerPos,
-                    g_frameTiming.previousPresentedPlayerPos
-                );
-                g_frameTiming.cameraDelta = pointDistance(
-                    g_frameTiming.sampledCameraPos,
-                    g_frameTiming.previousPresentedCameraPos
-                );
+                g_frameTiming.playerDelta = pointDistance(g_frameTiming.sampledPlayerPos, g_frameTiming.previousPresentedPlayerPos);
+                g_frameTiming.cameraDelta = pointDistance(g_frameTiming.sampledCameraPos, g_frameTiming.previousPresentedCameraPos);
             }
             else
             {
@@ -252,8 +271,6 @@ namespace
             );
         }
 
-        // Keep the overlay deliberately slow-updating so the debugger itself
-        // does not become a meaningful source of frame-time noise.
         g_frameTiming.overlayElapsedMs += g_frameTiming.renderDtMs;
         if (g_frameTiming.overlayElapsedMs >= 100.0f)
         {
@@ -263,6 +280,27 @@ namespace
 
         g_frameTiming.updatesSincePresent = 0;
         g_frameTiming.modifiedDeltaCallsSincePresent = 0;
+    }
+
+    float smoothstep01(float t)
+    {
+        t = std::clamp(t, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    float pointLength(CCPoint const& p)
+    {
+        return std::sqrt(p.x * p.x + p.y * p.y);
+    }
+
+    CCPoint clampVectorMagnitude(CCPoint value, float maxLength)
+    {
+        float length = pointLength(value);
+        if (length <= maxLength || length <= 0.00001f)
+            return value;
+
+        float scale = maxLength / length;
+        return {value.x * scale, value.y * scale};
     }
 }
 
@@ -288,19 +326,57 @@ class $modify(FrameTimingPresentHook, CCEGLView)
 
 class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
 {
+    struct MotionHistory
+    {
+        CCPoint lastPos = CCPointZero;
+        CCPoint velocity0 = CCPointZero;
+        CCPoint velocity1 = CCPointZero;
+        CCPoint velocity2 = CCPointZero;
+        int velocitySamples = 0;
+        bool seeded = false;
+
+        void reset()
+        {
+            *this = {};
+        }
+
+        void push(CCPoint const& pos)
+        {
+            if (!seeded)
+            {
+                lastPos = pos;
+                seeded = true;
+                return;
+            }
+
+            velocity2 = velocity1;
+            velocity1 = velocity0;
+            velocity0 = pos - lastPos;
+            lastPos = pos;
+            velocitySamples = std::min(velocitySamples + 1, 3);
+        }
+    };
+
     struct Fields
     {
         float timeTilNextTick = 0;
         float progressTilNextTick = 0;
-
-        CCPoint lastCamPos2;
-        CCPoint lastCamPos;
         float modifiedDeltaReturn = 0;
 
-        // Small safety additions around the original state machine.
-        bool hasCameraHistory = false;
+        MotionHistory cameraHistory;
+        MotionHistory player1History;
+        MotionHistory player2History;
+
         bool wasEnabled = false;
+        int lastMethod = -1;
     };
+
+    FrameExtrapolationMethod getMethod()
+    {
+        int value = FrameExtrapolationMethodOption::get()->getValue();
+        value = std::clamp(value, 0, 4);
+        return static_cast<FrameExtrapolationMethod>(value);
+    }
 
     void resetExtrapolationState()
     {
@@ -308,9 +384,107 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         self->timeTilNextTick = 0;
         self->progressTilNextTick = 0;
         self->modifiedDeltaReturn = 0;
-        self->lastCamPos2 = CCPointZero;
-        self->lastCamPos = CCPointZero;
-        self->hasCameraHistory = false;
+        self->cameraHistory.reset();
+        self->player1History.reset();
+        self->player2History.reset();
+    }
+
+    CCPoint getPredictedStep(MotionHistory const& history, FrameExtrapolationMethod method)
+    {
+        if (history.velocitySamples <= 0)
+            return CCPointZero;
+
+        CCPoint v0 = history.velocity0;
+        CCPoint v1 = history.velocity1;
+        CCPoint v2 = history.velocity2;
+
+        switch (method)
+        {
+            case FrameExtrapolationMethod::LegacyLinear:
+            case FrameExtrapolationMethod::Smoothstep:
+                return v0;
+
+            case FrameExtrapolationMethod::AdamsBashforth2:
+                if (history.velocitySamples < 2)
+                    return v0;
+                return {
+                    1.5f * v0.x - 0.5f * v1.x,
+                    1.5f * v0.y - 0.5f * v1.y
+                };
+
+            case FrameExtrapolationMethod::AdamsBashforth3:
+                if (history.velocitySamples < 3)
+                {
+                    if (history.velocitySamples >= 2)
+                        return {1.5f * v0.x - 0.5f * v1.x, 1.5f * v0.y - 0.5f * v1.y};
+                    return v0;
+                }
+                return {
+                    (23.0f * v0.x - 16.0f * v1.x + 5.0f * v2.x) / 12.0f,
+                    (23.0f * v0.y - 16.0f * v1.y + 5.0f * v2.y) / 12.0f
+                };
+
+            case FrameExtrapolationMethod::AdaptiveHybrid:
+            {
+                if (history.velocitySamples < 2)
+                    return v0;
+
+                CCPoint acceleration = v0 - v1;
+                float speed = pointLength(v0);
+                float accel = pointLength(acceleration);
+                float ratio = accel / std::max(speed, 0.001f);
+
+                CCPoint predicted = v0;
+
+                if (history.velocitySamples >= 3 && ratio < 0.30f)
+                {
+                    predicted = {
+                        (23.0f * v0.x - 16.0f * v1.x + 5.0f * v2.x) / 12.0f,
+                        (23.0f * v0.y - 16.0f * v1.y + 5.0f * v2.y) / 12.0f
+                    };
+                }
+                else if (ratio < 0.75f)
+                {
+                    predicted = {
+                        1.5f * v0.x - 0.5f * v1.x,
+                        1.5f * v0.y - 0.5f * v1.y
+                    };
+                }
+
+                float maxPrediction = std::max(speed * 1.35f, 0.25f);
+                return clampVectorMagnitude(predicted, maxPrediction);
+            }
+        }
+
+        return v0;
+    }
+
+    CCPoint getVisualOffset(MotionHistory const& history, FrameExtrapolationMethod method, float percent)
+    {
+        float phase = method == FrameExtrapolationMethod::Smoothstep ? smoothstep01(percent) : percent;
+        CCPoint step = getPredictedStep(history, method);
+        return {step.x * phase, step.y * phase};
+    }
+
+    float getRotationPhase(FrameExtrapolationMethod method, float percent)
+    {
+        return method == FrameExtrapolationMethod::Smoothstep ? smoothstep01(percent) : percent;
+    }
+
+    void sampleAuthoritativeMotion()
+    {
+        auto self = m_fields.self();
+
+        if (m_objectLayer)
+            self->cameraHistory.push(m_objectLayer->getPosition());
+
+        if (m_player1)
+            self->player1History.push(m_player1->m_position);
+
+        if (m_player2)
+            self->player2History.push(m_player2->m_position);
+        else
+            self->player2History.reset();
     }
 
     float getModifiedDelta(float dt)
@@ -323,8 +497,6 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
             g_frameTiming.lastModifiedDeltaMs = pRet * 1000.0f;
         }
 
-        // Preserve the original timing source, but do not keep interpolation
-        // timing alive while the menu setting is disabled.
         if (FrameExtrapolation::get()->getRealEnabled())
             m_fields->modifiedDeltaReturn = pRet;
         else
@@ -340,20 +512,13 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         if (frameTimingDebuggerEnabled())
             ++g_frameTiming.updatesSincePresent;
 
-        // getModifiedDelta is called from inside the normal game update. Clearing
-        // this first prevents a previous tick value being reused if a frame does
-        // not produce a new modified delta.
         self->modifiedDeltaReturn = 0;
-
         GJBaseGameLayer::update(dt);
 
         auto playLayer = typeinfo_cast<PlayLayer*>(this);
         if (!playLayer)
             return;
 
-        // Capture the authoritative post-update state before this module applies
-        // any visual extrapolation. This lets the debugger compare baseline GD
-        // motion and extrapolated motion without mixing the two measurements.
         if (frameTimingDebuggerEnabled())
         {
             if (m_player1)
@@ -369,13 +534,21 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
                 resetExtrapolationState();
 
             self->wasEnabled = false;
+            self->lastMethod = -1;
             g_frameTiming.lastInterpPercent = 0.0f;
             return;
         }
 
         self->wasEnabled = true;
 
-        // Keep the same exclusions the original implementation ended up using.
+        auto method = getMethod();
+        int methodValue = static_cast<int>(method);
+        if (self->lastMethod != methodValue)
+        {
+            resetExtrapolationState();
+            self->lastMethod = methodValue;
+        }
+
         if (isFlipping())
         {
             resetExtrapolationState();
@@ -390,9 +563,6 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
 
         if (self->modifiedDeltaReturn != 0)
         {
-            // The original implementation uses this value as the interval until
-            // the next physics tick. A giant value after a hitch/pause causes the
-            // extrapolation percentage to behave badly, so simply re-baseline.
             if (!std::isfinite(self->modifiedDeltaReturn) || self->modifiedDeltaReturn <= 0 || self->modifiedDeltaReturn > 0.05f)
             {
                 resetExtrapolationState();
@@ -401,32 +571,11 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
 
             self->timeTilNextTick = self->modifiedDeltaReturn;
             self->progressTilNextTick = 0;
-
-            if (m_objectLayer)
-            {
-                auto currentCamPos = m_objectLayer->getPosition();
-
-                // The original code started lastCamPos2 at {0, 0}, which can make
-                // the first extrapolated frame jump. Seed both samples together.
-                if (!self->hasCameraHistory)
-                {
-                    self->lastCamPos2 = currentCamPos;
-                    self->lastCamPos = currentCamPos;
-                    self->hasCameraHistory = true;
-                }
-                else
-                {
-                    self->lastCamPos2 = self->lastCamPos;
-                    self->lastCamPos = currentCamPos;
-                }
-            }
+            sampleAuthoritativeMotion();
         }
         else
         {
             self->progressTilNextTick += dt;
-
-            // Do not let one bad render frame extrapolate multiple physics ticks
-            // into the future. This is still their same percentage-based logic.
             if (self->timeTilNextTick > 0)
                 self->progressTilNextTick = std::min(self->progressTilNextTick, self->timeTilNextTick);
         }
@@ -434,79 +583,65 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         if (self->timeTilNextTick <= 0 || !std::isfinite(self->timeTilNextTick))
             return;
 
-        // The percentage towards the next tick, exactly like the original logic,
-        // with a clamp so frame spikes cannot make it run away.
         float percent = std::clamp(self->progressTilNextTick / self->timeTilNextTick, 0.0f, 1.0f);
         g_frameTiming.lastInterpPercent = percent;
 
         if (!std::isfinite(percent))
             return;
 
-        if (m_objectLayer && self->hasCameraHistory)
-        {
-            auto endCamPos = self->lastCamPos + (self->lastCamPos - self->lastCamPos2);
+        CCPoint cameraOffset = getVisualOffset(self->cameraHistory, method, percent);
 
-            m_objectLayer->setPosition(
-                self->lastCamPos.x + (endCamPos.x - self->lastCamPos.x) * percent,
-                self->lastCamPos.y + (endCamPos.y - self->lastCamPos.y) * percent
-            );
+        if (m_objectLayer && self->cameraHistory.seeded)
+        {
+            auto base = self->cameraHistory.lastPos;
+            m_objectLayer->setPosition(base + cameraOffset);
         }
 
-        extrapolateGround(m_groundLayer, percent);
-        extrapolateGround(m_groundLayer2, percent);
+        extrapolateGround(m_groundLayer, cameraOffset.x);
+        extrapolateGround(m_groundLayer2, cameraOffset.x);
 
-        extrapolatePlayer(m_player1, percent);
+        extrapolatePlayer(m_player1, self->player1History, method, percent);
 
         if (m_player2)
-            extrapolatePlayer(m_player2, percent);
+            extrapolatePlayer(m_player2, self->player2History, method, percent);
     }
 
     float playerGetRotatedHitbox(PlayerObject* player)
     {
-        float rot = 0;
-
         if (player && player->m_isSideways)
-        {
-            rot = -90;
-        }
-
-        return rot;
+            return -90.0f;
+        return 0.0f;
     }
 
-    void extrapolatePlayer(PlayerObject* player, float percent)
+    void extrapolatePlayer(PlayerObject* player, MotionHistory const& history, FrameExtrapolationMethod method, float percent)
     {
-        if (!player)
+        if (!player || !history.seeded)
             return;
 
-        // This is the original GeodeMenu extrapolation formula.
-        float endXPos = player->m_position.x + (player->m_position.x - player->m_lastPosition.x);
-        float endYPos = player->m_position.y + (player->m_position.y - player->m_lastPosition.y);
+        CCPoint offset = getVisualOffset(history, method, percent);
+        player->CCNode::setPosition(history.lastPos + offset);
 
-        float rotateSpeed = (player->m_isBall && player->m_isBallRotating) ? 1.0 : player->m_rotateSpeed;
-        float endRot = ((player->m_rotationSpeed * rotateSpeed) / 240.0f);
-
-        player->CCNode::setPosition(ccp(
-            player->m_position.x + (endXPos - player->m_position.x) * percent,
-            player->m_position.y + (endYPos - player->m_position.y) * percent
-        ));
+        float rotateSpeed = (player->m_isBall && player->m_isBallRotating) ? 1.0f : player->m_rotateSpeed;
+        float tickRate = selfTickRate();
+        float endRot = tickRate > 0.0f ? (player->m_rotationSpeed * rotateSpeed) / tickRate : 0.0f;
+        float phase = getRotationPhase(method, percent);
 
         if (player->m_mainLayer)
-        {
-            player->m_mainLayer->setRotation(
-                endRot * percent + playerGetRotatedHitbox(player)
-            );
-        }
+            player->m_mainLayer->setRotation(endRot * phase + playerGetRotatedHitbox(player));
     }
 
-    void extrapolateGround(GJGroundLayer* ground, float percent)
+    float selfTickRate()
+    {
+        auto self = m_fields.self();
+        if (self->timeTilNextTick <= 0.0f)
+            return 240.0f;
+        return 1.0f / self->timeTilNextTick;
+    }
+
+    void extrapolateGround(GJGroundLayer* ground, float moveBy)
     {
         if (!ground)
             return;
-
-        auto self = m_fields.self();
-
-        // Keep their original ground extrapolation method too.
-        float moveBy = (self->lastCamPos.x - self->lastCamPos2.x);
 
         auto children = ground->getChildren();
         if (!children)
@@ -515,9 +650,7 @@ class $modify (ExtrapolatedGameLayer, GJBaseGameLayer)
         for (auto child : CCArrayExt<CCNode*>(children))
         {
             if (typeinfo_cast<CCSpriteBatchNode*>(child))
-            {
-                child->setPositionX(moveBy * percent);
-            }
+                child->setPositionX(moveBy);
         }
     }
 };
