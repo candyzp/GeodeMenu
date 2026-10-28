@@ -58,27 +58,54 @@ void SpeedhackScheduler::update(float dt)
     CCScheduler::update(value == 1.0f ? dt : dt * value);
 }
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+namespace {
+    // CCTransitionScene::onExit recursively calls CCNode::onExit, which pauses
+    // schedulers for nodes that are leaving the scene. On iOS 2.2081, inspecting
+    // Geode user metadata from that teardown path can dereference a stale legacy
+    // m_pUserObject pointer (observed in GeodeNodeMetadata::set). Do not query
+    // user objects while the transition is exiting; those nodes are being torn
+    // down anyway and must follow the engine's normal pause path.
+    unsigned g_transitionExitDepth = 0;
+
+    struct TransitionExitScope {
+        TransitionExitScope() { ++g_transitionExitDepth; }
+        ~TransitionExitScope() { --g_transitionExitDepth; }
+    };
+}
+
+void QOLTransitionScene::onExit()
+{
+    TransitionExitScope scope;
+    CCTransitionScene::onExit();
+}
+#endif
+
+// Iterative ancestor walk avoids recursive calls for deep node trees.
 bool isNodeUnpausable(CCNode* node)
 {
-    if (!node)
-        return false;
-
-    if (node->getUserObject("unpausable"_spr))
-        return true;
-
-    if (node->getParent())
-        return isNodeUnpausable(node->getParent());
-
+    for (auto* current = node; current; current = current->getParent())
+    {
+        if (current->getUserObject("unpausable"_spr))
+            return true;
+    }
     return false;
 }
 
 void SpeedhackScheduler::pauseTarget(CCObject *pTarget)
 {
-    if (auto node = typeinfo_cast<CCNode*>(pTarget))
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (g_transitionExitDepth == 0)
     {
-        if (isNodeUnpausable(node))
-            return;
+#endif
+        if (auto node = typeinfo_cast<CCNode*>(pTarget))
+        {
+            if (isNodeUnpausable(node))
+                return;
+        }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
     }
+#endif
 
     CCScheduler::pauseTarget(pTarget);
 }
