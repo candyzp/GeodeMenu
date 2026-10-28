@@ -11,7 +11,17 @@ using namespace qolmod;
 
 bool VisitHook::init()
 {
+    // VisitHook is a callback wrapper, not a real CCGridBase render target.
+    // Initialize inherited fields so a missed hook cannot feed garbage
+    // pointers to CCGridBase's default renderer or destructor.
     m_bActive = true;
+    m_nReuseGrid = GRID_MARKER;
+    m_sGridSize = cocos2d::CCSize(0.f, 0.f);
+    m_pTexture = nullptr;
+    m_obStep = cocos2d::CCPoint(0.f, 0.f);
+    m_pGrabber = nullptr;
+    m_bIsTextureFlipped = false;
+    m_pShaderProgram = nullptr;
     return true;
 }
 
@@ -47,12 +57,12 @@ class $modify (VisitHookNode, CCNode)
     {
         // Keep the global visit hook cheap: most nodes have no grid at all.
         auto grid = this->m_pGrid;
-        if (!grid || !grid->isActive())
+        if (!grid || !grid->isActive() || grid->getReuseGrid() != VisitHook::GRID_MARKER)
             return CCNode::visit();
 
-        auto hook = typeinfo_cast<VisitHook*>(grid);
-        if (!hook)
-            return CCNode::visit();
+        // This marker is set only by VisitHook::init, and avoids relying on
+        // iOS runtime typeinfo to distinguish this callback-only grid.
+        auto hook = static_cast<VisitHook*>(grid);
 
         // Match CCNode::visit's grid path, but replace beforeDraw/afterDraw
         // with VisitHook callbacks (the same behavior used by other platforms).
@@ -107,8 +117,8 @@ class $modify (VisitHookNode, CCNode)
         auto currentGrid = this->m_pGrid;
         if (currentGrid && currentGrid->isActive())
         {
-            if (auto currentHook = typeinfo_cast<VisitHook*>(currentGrid))
-                currentHook->postVisit(this);
+            if (currentGrid->getReuseGrid() == VisitHook::GRID_MARKER)
+                static_cast<VisitHook*>(currentGrid)->postVisit(this);
             else
                 currentGrid->afterDraw(this);
         }
