@@ -45,10 +45,13 @@ class $modify (VisitHookNode, CCNode)
 {
     void visit()
     {
-        auto grid = this->getGrid();
-        auto hook = typeinfo_cast<VisitHook*>(grid);
+        // Keep the global visit hook cheap: most nodes have no grid at all.
+        auto grid = this->m_pGrid;
+        if (!grid || !grid->isActive())
+            return CCNode::visit();
 
-        if (!hook || !grid->isActive())
+        auto hook = typeinfo_cast<VisitHook*>(grid);
+        if (!hook)
             return CCNode::visit();
 
         // Match CCNode::visit's grid path, but replace beforeDraw/afterDraw
@@ -101,7 +104,7 @@ class $modify (VisitHookNode, CCNode)
 
         // Match the original afterDraw condition in case the callback changed
         // the node's grid while rendering.
-        auto currentGrid = this->getGrid();
+        auto currentGrid = this->m_pGrid;
         if (currentGrid && currentGrid->isActive())
         {
             if (auto currentHook = typeinfo_cast<VisitHook*>(currentGrid))
