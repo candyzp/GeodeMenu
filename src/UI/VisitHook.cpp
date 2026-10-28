@@ -1,5 +1,7 @@
 #include "VisitHook.hpp"
+#if !defined(GEODE_IS_IOS)
 #include <Geode/modify/CCGridBase.hpp>
+#endif
 
 using namespace geode::prelude;
 using namespace qolmod;
@@ -32,6 +34,10 @@ void VisitHook::postVisit(cocos2d::CCNode* node)
         callbackPost(node);
 }
 
+// iOS 2.2081 bindings do not expose hook addresses for CCGridBase::beforeDraw
+// and CCGridBase::afterDraw. Keep this optional global hook on the platforms
+// where the bindings support it; do not instantiate unavailable iOS hooks.
+#if !defined(GEODE_IS_IOS)
 class $modify (VisitHookGridBase, CCGridBase)
 {
     void beforeDraw(void)
@@ -56,3 +62,4 @@ class $modify (VisitHookGridBase, CCGridBase)
         CCGridBase::afterDraw(pTarget);
     }
 };
+#endif
