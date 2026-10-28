@@ -101,10 +101,13 @@ class $modify (VisitHookNode, CCNode)
 
         // Match the original afterDraw condition in case the callback changed
         // the node's grid while rendering.
-        if (auto currentHook = typeinfo_cast<VisitHook*>(this->getGrid());
-            currentHook && this->getGrid()->isActive())
+        auto currentGrid = this->getGrid();
+        if (currentGrid && currentGrid->isActive())
         {
-            currentHook->postVisit(this);
+            if (auto currentHook = typeinfo_cast<VisitHook*>(currentGrid))
+                currentHook->postVisit(this);
+            else
+                currentGrid->afterDraw(this);
         }
 
         kmGLPopMatrix();
