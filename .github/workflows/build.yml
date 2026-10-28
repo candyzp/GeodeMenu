@@ -39,9 +39,6 @@ jobs:
         uses: geode-sdk/build-geode-mod@main
         with:
           bindings: 'TheSillyDoggo/bindings'
-          # Pin to the revision used by the last successful platform matrix.
-          # Following the moving main branch now breaks CheckpointFix against PlayerObject.
-          bindings-ref: 257e09bff1f86c34ac06614dc9e39a120c78c074
           build-config: 'Release'
           export-pdb: true
           combine: true
