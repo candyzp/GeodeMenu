@@ -2,6 +2,11 @@
 
 #if defined(GEODE_IS_IOS)
 #include <Geode/modify/CCNode.hpp>
+#include <unordered_set>
+
+namespace {
+std::unordered_set<cocos2d::CCGridBase*> s_visitHookGrids;
+}
 #else
 #include <Geode/modify/CCGridBase.hpp>
 #endif
@@ -9,21 +14,41 @@
 using namespace geode::prelude;
 using namespace qolmod;
 
+VisitHook::~VisitHook()
+{
+#if defined(GEODE_IS_IOS)
+    s_visitHookGrids.erase(this);
+#endif
+}
+
 bool VisitHook::init()
 {
     // VisitHook is a callback wrapper, not a real CCGridBase render target.
     // Initialize inherited fields so a missed hook cannot feed garbage
     // pointers to CCGridBase's default renderer or destructor.
     m_bActive = true;
-    m_nReuseGrid = GRID_MARKER;
+    m_nReuseGrid = 0;
     m_sGridSize = cocos2d::CCSize(0.f, 0.f);
     m_pTexture = nullptr;
     m_obStep = cocos2d::CCPoint(0.f, 0.f);
     m_pGrabber = nullptr;
     m_bIsTextureFlipped = false;
     m_pShaderProgram = nullptr;
+
+#if defined(GEODE_IS_IOS)
+    // Track object identity separately; m_nReuseGrid is a mutable reuse count
+    // and cannot safely double as a type marker.
+    s_visitHookGrids.insert(this);
+#endif
     return true;
 }
+
+#if defined(GEODE_IS_IOS)
+bool VisitHook::isVisitHookGrid(cocos2d::CCGridBase* grid)
+{
+    return grid && s_visitHookGrids.find(grid) != s_visitHookGrids.end();
+}
+#endif
 
 void VisitHook::setCallbackPre(const VisitHook::VisitCallbackFunc& func)
 {
@@ -57,15 +82,13 @@ class $modify (VisitHookNode, CCNode)
     {
         // Keep the global visit hook cheap: most nodes have no grid at all.
         auto grid = this->m_pGrid;
-        if (!grid || !grid->isActive() || grid->getReuseGrid() != VisitHook::GRID_MARKER)
+        if (!grid || !grid->isActive() || !VisitHook::isVisitHookGrid(grid))
             return CCNode::visit();
 
-        // This marker is set only by VisitHook::init, and avoids relying on
-        // iOS runtime typeinfo to distinguish this callback-only grid.
         auto hook = static_cast<VisitHook*>(grid);
 
         // Match CCNode::visit's grid path, but replace beforeDraw/afterDraw
-        // with VisitHook callbacks (the same behavior used by other platforms).
+        // with VisitHook callbacks (the same behavior used on other platforms).
         if (!this->isVisible())
             return;
 
@@ -117,7 +140,7 @@ class $modify (VisitHookNode, CCNode)
         auto currentGrid = this->m_pGrid;
         if (currentGrid && currentGrid->isActive())
         {
-            if (currentGrid->getReuseGrid() == VisitHook::GRID_MARKER)
+            if (VisitHook::isVisitHookGrid(currentGrid))
                 static_cast<VisitHook*>(currentGrid)->postVisit(this);
             else
                 currentGrid->afterDraw(this);
