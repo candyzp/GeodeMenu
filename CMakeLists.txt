@@ -42,6 +42,15 @@ else()
 endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
+
+# The iOS codegen output can place FMOD wrappers in GeneratedSource.cpp.
+# GeodeBindings does not inherit the consumer-side Geode/Bindings.hpp PCH, so
+# include FMOD declarations for its generated translation units explicitly.
+if ("${GEODE_TARGET_PLATFORM}" STREQUAL "iOS" OR IOS)
+    if (TARGET GeodeBindings)
+        target_precompile_headers(GeodeBindings PRIVATE <fmod.hpp>)
+    endif()
+endif()
 include_directories(include src/Client src/Hacks/Speedhack src/Utils src/Notifications src/Localisation src/GUI src/UI/Nodes/Label src/UI)
 
 # CPMAddPackage("gh:TheSillyDoggo/gd-imgui-cocos#2d33a3d") # should be geode

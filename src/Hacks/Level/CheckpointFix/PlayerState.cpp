@@ -14,6 +14,38 @@ using namespace qolmod;
 #define LOAD_GO_MEMBER($member) \
     player->$member = goMembers.$member;
 
+// These opaque fields existed in an older 2.2081 binding snapshot. Newer
+// bindings may omit or rename them, so access them only when the type exposes
+// the field. This keeps checkpoint snapshots buildable across binding revisions
+// without substituting a guessed field with potentially different semantics.
+template <typename PlayerT>
+static void saveLegacyPlayerField(PlayerT* player, PlayerState::PlayerObjectMembers& members)
+{
+    if constexpr (requires(PlayerT* p) { p->m_unk9e8; })
+        members.m_unk9e8 = player->m_unk9e8;
+}
+
+template <typename PlayerT>
+static void loadLegacyPlayerField(PlayerT* player, PlayerState::PlayerObjectMembers const& members)
+{
+    if constexpr (requires(PlayerT* p) { p->m_unk9e8; })
+        player->m_unk9e8 = members.m_unk9e8;
+}
+
+template <typename PlayerT>
+static void saveLegacyGameObjectField(PlayerT* player, PlayerState::GameObjectMembers& members)
+{
+    if constexpr (requires(PlayerT* p) { p->m_unk530; })
+        members.m_unk530 = player->m_unk530;
+}
+
+template <typename PlayerT>
+static void loadLegacyGameObjectField(PlayerT* player, PlayerState::GameObjectMembers const& members)
+{
+    if constexpr (requires(PlayerT* p) { p->m_unk530; })
+        player->m_unk530 = members.m_unk530;
+}
+
 void PlayerState::saveState(PlayerObject* player)
 {
     position = player->getPosition();
@@ -175,7 +207,7 @@ void PlayerState::saveState(PlayerObject* player)
     SAVE_PL_MEMBER(m_maybeReverseAcceleration);
     SAVE_PL_MEMBER(m_xVelocityRelated2);
     SAVE_PL_MEMBER(m_isDashing);
-    SAVE_PL_MEMBER(m_unk9e8);
+    saveLegacyPlayerField(player, plMembers);
     SAVE_PL_MEMBER(m_groundObjectMaterial);
     SAVE_PL_MEMBER(m_vehicleSize);
     SAVE_PL_MEMBER(m_playerSpeed);
@@ -463,7 +495,7 @@ void PlayerState::saveState(PlayerObject* player)
     SAVE_GO_MEMBER(m_areaOpacityValue);
     SAVE_GO_MEMBER(m_areaOpacityIndex);
     SAVE_GO_MEMBER(m_unk52C);
-    SAVE_GO_MEMBER(m_unk530);
+    saveLegacyGameObjectField(player, goMembers);
     SAVE_GO_MEMBER(m_isUIObject);
     SAVE_GO_MEMBER(m_greenDebugDraw);
 }
@@ -629,7 +661,7 @@ void PlayerState::loadState(PlayerObject* player)
     LOAD_PL_MEMBER(m_maybeReverseAcceleration);
     LOAD_PL_MEMBER(m_xVelocityRelated2);
     LOAD_PL_MEMBER(m_isDashing);
-    LOAD_PL_MEMBER(m_unk9e8);
+    loadLegacyPlayerField(player, plMembers);
     LOAD_PL_MEMBER(m_groundObjectMaterial);
     LOAD_PL_MEMBER(m_vehicleSize);
     LOAD_PL_MEMBER(m_playerSpeed);
@@ -917,7 +949,7 @@ void PlayerState::loadState(PlayerObject* player)
     LOAD_GO_MEMBER(m_areaOpacityValue);
     LOAD_GO_MEMBER(m_areaOpacityIndex);
     LOAD_GO_MEMBER(m_unk52C);
-    LOAD_GO_MEMBER(m_unk530);
+    loadLegacyGameObjectField(player, goMembers);
     LOAD_GO_MEMBER(m_isUIObject);
     LOAD_GO_MEMBER(m_greenDebugDraw);
 }

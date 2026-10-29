@@ -6,21 +6,22 @@ namespace qolmod
 {
     class VisitHook : public cocos2d::CCGridBase
     {
+    private:
         using VisitCallbackFunc = std::function<void(cocos2d::CCNode* node)>;
 
-        protected:
-            VisitCallbackFunc callbackPre = nullptr;
-            VisitCallbackFunc callbackPost = nullptr;
+    protected:
+        VisitCallbackFunc callbackPre = nullptr;
+        VisitCallbackFunc callbackPost = nullptr;
 
-            virtual bool init();
+        virtual bool init();
 
-        public:
-            CREATE_FUNC(VisitHook);
+    public:
+        CREATE_FUNC(VisitHook);
 
-            void setCallbackPre(const VisitCallbackFunc& func);
-            void setCallbackPost(const VisitCallbackFunc& func);
-        
-            virtual void preVisit();
-            virtual void postVisit(cocos2d::CCNode* node);
+        void setCallbackPre(const VisitCallbackFunc& func);
+        void setCallbackPost(const VisitCallbackFunc& func);
+
+        virtual void preVisit();
+        virtual void postVisit(cocos2d::CCNode* node);
     };
 };
